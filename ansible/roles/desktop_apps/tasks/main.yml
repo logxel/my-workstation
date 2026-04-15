@@ -22,7 +22,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
   tags:
     - applications
     - vscode
@@ -33,7 +33,7 @@
   register: desktop_apps_vscode_argv_stat
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
   tags:
     - applications
     - vscode
@@ -41,7 +41,7 @@
 - name: Load current VS Code runtime arguments
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
   tags:
     - applications
@@ -66,7 +66,7 @@
         desktop_apps_vscode_argv_existing_content: ""
         desktop_apps_vscode_argv_has_password_store: false
 
-- name: Update existing VS Code password-store runtime argument on Pop!_OS
+- name: Update existing VS Code password-store runtime argument
   ansible.builtin.replace:
     path: "{{ local_home }}/.vscode/argv.json"
     regexp: '(?m)^(\s*"password-store"\s*:\s*")[^"]*("\s*,?\s*)$'
@@ -75,14 +75,14 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
     - desktop_apps_vscode_argv_has_password_store | default(false)
   tags:
     - applications
     - vscode
 
-- name: Add missing VS Code password-store runtime argument on Pop!_OS
+- name: Add missing VS Code password-store runtime argument
   ansible.builtin.replace:
     path: "{{ local_home }}/.vscode/argv.json"
     regexp: '(?m)^(\s*"[^"]+"\s*:\s*.+)(\n\s*})$'
@@ -91,14 +91,14 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
     - not (desktop_apps_vscode_argv_has_password_store | default(false))
   tags:
     - applications
     - vscode
 
-- name: Create VS Code runtime arguments file when missing on Pop!_OS
+- name: Create VS Code runtime arguments file when missing
   ansible.builtin.copy:
     dest: "{{ local_home }}/.vscode/argv.json"
     content: |
@@ -110,7 +110,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution == 'Pop!_OS'
+    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
     - not desktop_apps_vscode_argv_stat.stat.exists
   tags:
     - applications
