@@ -1,0 +1,32 @@
+---
+- name: Ensure GNOME System Monitor Super+Shift+Escape shortcut is registered
+  ansible.builtin.shell: |
+    set -eu
+    entry='/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/system-monitor/'
+    current="$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)"
+    if [[ "$current" == "@as []" || "$current" == "[]" ]]; then
+      new_list="['$entry']"
+    elif [[ "$current" == *"$entry"* ]]; then
+      new_list="$current"
+    else
+      new_list="${current%]}"
+      new_list+=" , '$entry']"
+    fi
+    gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_list"
+    base_path='org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/system-monitor/'
+    gsettings set "$base_path" name 'System Monitor'
+    gsettings set "$base_path" command 'gnome-system-monitor'
+    gsettings set "$base_path" binding '<Control><Shift>Escape'
+  args:
+    executable: /bin/bash
+  environment:
+    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+  when:
+    - common_is_pop_desktop_host
+    - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
+  become: false
+  changed_when: false
+  tags:
+    - system

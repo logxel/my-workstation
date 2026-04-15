@@ -233,6 +233,13 @@
   tags:
     - clip-win
 
+# Pop!_OS system monitor shortcut setup
+- name: Include GNOME System Monitor shortcut tasks
+  ansible.builtin.import_tasks: gnome_system_monitor.yml
+  when: common_is_pop_desktop_host
+  tags:
+    - system
+
 # CopyQ legacy config setup (Win+V shortcut)
 - name: Include CopyQ config tasks
   ansible.builtin.import_tasks: copyq.yml
