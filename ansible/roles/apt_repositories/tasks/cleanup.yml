@@ -35,6 +35,15 @@
     - repos
     - docker
 
+- name: Remove legacy CopyQ PPA source file
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ppa_hluk_copyq_noble.list
+    state: absent
+  when: common_install_copyq
+  tags:
+    - repos
+    - copyq
+
 - name: Find legacy Git Core PPA source files
   ansible.builtin.find:
     paths: /etc/apt/sources.list.d
@@ -59,6 +68,17 @@
     - ansible_distribution in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
     - apt_repositories_git_core_ppa_legacy_sources.matched | default(0) > 0
+  tags:
+    - repos
+    - git
+
+- name: Remove legacy PPA-style Git Core source file (ppa_git_core_ppa_noble.list)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ppa_git_core_ppa_noble.list
+    state: absent
+  when:
+    - ansible_distribution in supported_distributions
+    - not common_selective_feature_run or common_enable_git_credential_oauth
   tags:
     - repos
     - git

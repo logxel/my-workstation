@@ -152,16 +152,54 @@
     - docker
 
 - name: Register the CopyQ PPA repository
-  ansible.builtin.apt_repository:
-    repo: ppa:hluk/copyq
-    state: present
-    update_cache: false
+  block:
+    - name: Ensure the APT keyrings directory exists for CopyQ
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: common_install_copyq
+      tags:
+        - packages
+        - system
+        - repos
+
+    - name: Install the CopyQ PPA signing key into a dedicated keyring
+      ansible.builtin.get_url:
+        url: >-
+          https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x407DCF2158B84056D11BBC944F0B2F06AA07D22F
+        dest: /etc/apt/keyrings/hluk-copyq.gpg
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+      when: common_install_copyq
+      tags:
+        - packages
+        - system
+        - repos
+        - copyq
+
+    - name: Render the CopyQ repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/hluk-copyq.list
+        content: "{{ (copyq_repo_parts | join(' ')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        copyq_repo_parts:
+          - "deb [signed-by=/etc/apt/keyrings/hluk-copyq.gpg]"
+          - https://ppa.launchpadcontent.net/hluk/copyq/ubuntu
+          - "{{ common_ubuntu_codename }}"
+          - main
+      when: common_install_copyq
+      tags:
+        - repos
+        - copyq
   when: common_install_copyq
-  tags:
-    - packages
-    - system
-    - repos
-    - copyq
 
 - name: Install the Git Core PPA signing key into a dedicated keyring
   ansible.builtin.get_url:
