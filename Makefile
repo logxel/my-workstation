@@ -38,12 +38,12 @@ features ?=
 
 playbook:
 	@$(MAKE) check-ansible-runtime
-	ansible-playbook $(ANSIBLE_DIR)/local.yml --tags "$(ansible-tags)"
+	ansible-playbook $(ANSIBLE_DIR)/local.yml --tags "$(ansible-tags)" -K
 
 install-feature:
 	@if [ -z "$(features)" ]; then echo "Usage: make install-feature features=thunderbird"; exit 2; fi
 	@$(MAKE) check-ansible-runtime
-	ansible-playbook $(ANSIBLE_DIR)/local.yml --extra-vars "dotfiles_only_features=$(features)"
+	ansible-playbook $(ANSIBLE_DIR)/local.yml --extra-vars "dotfiles_only_features=$(features)" -K
 
 apt-clean:
 	@$(MAKE) check-ansible-runtime

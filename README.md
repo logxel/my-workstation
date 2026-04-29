@@ -236,7 +236,7 @@ El selector fuerza a `enabled` solo las features indicadas, desactiva el resto d
 Ejemplos:
 
 ```bash
-ansible-playbook ansible/local.yml --extra-vars 'dotfiles_only_features=thunderbird'
+ansible-playbook ansible/local.yml --extra-vars 'dotfiles_only_features=thunderbird' -K
 make install-feature features=thunderbird
 ./bootstrap.sh --only-feature thunderbird
 ```

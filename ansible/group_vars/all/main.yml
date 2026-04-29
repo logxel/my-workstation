@@ -104,10 +104,10 @@ distro_flatpak_apps:
     - com.valvesoftware.Steam
     - org.videolan.VLC
 rustdesk_version: "1.4.6"
-clip_win_version: "0.6.4-patched.1"
+clip_win_version: "0.6.5-patched.1"
 clip_win_release_deb_checksums:
-  amd64: "sha256:d44ec0c9f694789ca32947854f24a0820abb886b8cc1f0aea2aee5e9e0aaa512"
-  arm64: "sha256:b4d945f6147f860051b9328140b7da4e2f04ce74bf1dc96fda09b7d8f7dbb99a"
+  amd64: "sha256:4d362f06c43ec66f82a1cc2f10a7e3fbbe99c0624a75defb80710f068fc0b38c"
+  arm64: "sha256:177b1b6696da22942505106b6f0ef35e964725e8b0b56269faa4fb48a99b667c"
 rustdesk_release_arch_map:
   amd64: x86_64
   arm64: aarch64

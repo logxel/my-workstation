@@ -26,6 +26,7 @@
               else (dotfiles_only_features | default([]))
             )
             | map('trim')
+            | map('replace', '-', '_')
             | reject('equalto', '')
             | unique
             | list
