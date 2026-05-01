@@ -126,10 +126,11 @@ virt_manager_default_uri: qemu:///system
 docker_daemon_config:
   log-driver: json-file
   log-opts:
-    max-size: 10m
+    max-size: "10m"
     max-file: "3"
-    mode: non-blocking
-    max-buffer-size: 4m
+    mode: "non-blocking"
+    max-buffer-size: "4m"
+docker_desktop_cleanup_approved: false
 vscode_file_manager_integration: auto
 nix_install_mode: single-user
 nix_home_manager_profile_name: my-workstation-home-manager

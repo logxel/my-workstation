@@ -1,4 +1,35 @@
 ---
+- name: Stop when Docker Desktop is installed without explicit replacement approval
+  ansible.builtin.fail:
+    msg: >-
+      Docker Desktop is installed on this host. This playbook manages Docker Engine only and will not
+      replace Docker Desktop unless you explicitly approve it. Set docker_desktop_cleanup_approved=true
+      in ansible/group_vars/all/override.yml or pass --extra-vars
+      docker_desktop_cleanup_approved=true to remove the docker-desktop package, migrate
+      {{ common_user_docker_config_path }} by dropping Docker Desktop-only keys, remove Docker Desktop
+      user state, and continue with Docker Engine installation.
+  when:
+    - common_enable_docker
+    - common_has_docker_desktop
+    - not (docker_desktop_cleanup_approved | bool)
+  tags:
+    - packages
+    - system
+
+- name: Remove Docker Desktop after explicit replacement approval
+  ansible.builtin.apt:
+    name: docker-desktop
+    state: absent
+    purge: true
+    autoremove: true
+  when:
+    - common_enable_docker
+    - common_has_docker_desktop
+    - docker_desktop_cleanup_approved | bool
+  tags:
+    - packages
+    - system
+
 - name: Uninstall conflicting Docker packages (docker.io / containerd / runc)
   ansible.builtin.apt:
     name:

@@ -224,6 +224,10 @@
         common_home_manager_global_legacy_profile_path: >-
           /nix/var/nix/profiles/per-user/{{ local_user }}/home-manager
         common_nix_daemon_profile_script: /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+        common_has_docker_desktop: "{{ 'docker-desktop' in ansible_facts.packages }}"
+        common_user_docker_config_dir: "{{ local_home }}/.docker"
+        common_user_docker_config_path: "{{ local_home }}/.docker/config.json"
+        common_user_docker_desktop_dir: "{{ local_home }}/.docker/desktop"
         common_has_gnome_desktop: >-
           {{
             gnome_desktop_package_candidates

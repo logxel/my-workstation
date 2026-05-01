@@ -7,6 +7,10 @@ feature_flags:
   virt_manager: enabled
   # openvpn: auto
 
+# Set to true only when you want the playbook to replace Docker Desktop with
+# Docker Engine, migrate ~/.docker/config.json, and remove Docker Desktop state.
+# docker_desktop_cleanup_approved: true
+
 # Optional virt-manager overrides.
 # virt_manager_packages:
 #   - qemu-kvm

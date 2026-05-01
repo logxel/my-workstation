@@ -1,4 +1,80 @@
 ---
+- name: Check whether the user Docker config exists
+  become: true
+  become_user: "{{ local_user }}"
+  ansible.builtin.stat:
+    path: "{{ common_user_docker_config_path }}"
+  register: docker_user_config_file
+  when: common_enable_docker | default(false)
+  tags:
+    - docker
+
+- name: Migrate Docker Desktop config.json for Docker Engine
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - common_enable_docker | default(false)
+    - common_has_docker_desktop
+    - docker_desktop_cleanup_approved | bool
+    - docker_user_config_file.stat.exists
+  tags:
+    - docker
+  block:
+    - name: Read the current user Docker config
+      ansible.builtin.slurp:
+        path: "{{ common_user_docker_config_path }}"
+      register: docker_user_config_slurp
+
+    - name: Parse the current user Docker config
+      ansible.builtin.set_fact:
+        docker_user_config_existing: "{{ docker_user_config_slurp.content | b64decode | from_json }}"
+
+    - name: Remove Docker Desktop-only user config keys
+      ansible.builtin.set_fact:
+        docker_user_config_migrated: >-
+          {{
+            docker_user_config_existing
+            | dict2items
+            | rejectattr('key', 'in', ['credsStore', 'currentContext'])
+            | items2dict
+          }}
+
+    - name: Backup the original Docker user config before migration
+      ansible.builtin.copy:
+        src: "{{ common_user_docker_config_path }}"
+        dest: "{{ common_user_docker_config_path }}.docker-desktop.bak"
+        remote_src: true
+        mode: "0600"
+        force: false
+      when: docker_user_config_migrated != docker_user_config_existing
+
+    - name: Write the migrated Docker user config
+      ansible.builtin.copy:
+        dest: "{{ common_user_docker_config_path }}"
+        content: "{{ docker_user_config_migrated | to_nice_json }}"
+        mode: "0600"
+      when: docker_user_config_migrated != docker_user_config_existing
+  rescue:
+    - name: Stop when the user Docker config cannot be migrated safely
+      ansible.builtin.fail:
+        msg: >-
+          {{ common_user_docker_config_path }} exists but could not be parsed as valid JSON, so Docker Desktop
+          cleanup cannot continue safely. Fix or remove the file, or back it up manually before rerunning with
+          docker_desktop_cleanup_approved=true.
+
+- name: Remove the Docker Desktop user state directory after migration
+  become: true
+  become_user: "{{ local_user }}"
+  ansible.builtin.file:
+    path: "{{ common_user_docker_desktop_dir }}"
+    state: absent
+  when:
+    - common_enable_docker | default(false)
+    - common_has_docker_desktop
+    - docker_desktop_cleanup_approved | bool
+  tags:
+    - docker
+
 - name: Ensure the Docker configuration directory exists
   ansible.builtin.file:
     path: /etc/docker
