@@ -67,6 +67,7 @@ office_suite_package_candidates:
   - calligra
   - abiword
   - gnumeric
+# Set to a pinned version (recommended) or "latest" to resolve from GitHub at runtime.
 gcm_version: "2.7.3"
 gcm_release_arch_map:
   amd64: x64

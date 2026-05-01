@@ -144,7 +144,7 @@
   ansible.builtin.assert:
     that:
       - common_gcm_release_arch | length > 0
-      - common_gcm_deb_checksum | length > 0
+      - gcm_version == 'latest' or common_gcm_deb_checksum | length > 0
     fail_msg: Git Credential Manager publishes Debian packages only for amd64 and arm64.
   when: common_enable_git_credential_oauth
   tags:
@@ -170,7 +170,7 @@
     dest: "/tmp/{{ common_gcm_package_filename }}"
     mode: "0644"
     force: false
-    checksum: "{{ common_gcm_deb_checksum }}"
+    checksum: "{{ common_gcm_deb_checksum if common_gcm_deb_checksum | length > 0 else omit }}"
   when: common_enable_git_credential_oauth
   tags:
     - packages

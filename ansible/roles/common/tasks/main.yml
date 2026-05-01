@@ -279,19 +279,47 @@
           clip_win_version }}/clip-win_{{ clip_win_version }}_{{ common_deb_arch
           }}.deb
 
+    - name: Fetch latest Git Credential Manager release metadata
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest
+        method: GET
+        return_content: true
+        status_code: 200
+      register: common_gcm_latest_api_response
+      when: gcm_version == 'latest'
+
+    - name: Resolve Git Credential Manager release version
+      ansible.builtin.set_fact:
+        common_gcm_resolved_version: >-
+          {{
+            (
+              common_gcm_latest_api_response.json.tag_name
+              | default('')
+              | regex_replace('^v', '')
+            )
+            if gcm_version == 'latest'
+            else gcm_version
+          }}
+
+    - name: Ensure Git Credential Manager release version is resolved
+      ansible.builtin.assert:
+        that:
+          - common_gcm_resolved_version | length > 0
+        fail_msg: Could not resolve a valid Git Credential Manager release version.
+
     - name: Derive Git Credential Manager release facts
       ansible.builtin.set_fact:
         common_gcm_release_arch: >-
           {{ gcm_release_arch_map.get(common_deb_arch, '') }}
         common_gcm_deb_checksum: >-
-          {{ gcm_release_deb_checksums.get(common_deb_arch, '') }}
+          {{ '' if gcm_version == 'latest' else gcm_release_deb_checksums.get(common_deb_arch, '') }}
         common_gcm_package_filename: >-
           gcm-linux-{{ gcm_release_arch_map.get(common_deb_arch, '') }}-{{
-          gcm_version }}.deb
+          common_gcm_resolved_version }}.deb
         common_gcm_deb_url: >-
           https://github.com/git-ecosystem/git-credential-manager/releases/download/v{{
-          gcm_version }}/gcm-linux-{{
-          gcm_release_arch_map.get(common_deb_arch, '') }}-{{ gcm_version }}.deb
+          common_gcm_resolved_version }}/gcm-linux-{{
+          gcm_release_arch_map.get(common_deb_arch, '') }}-{{ common_gcm_resolved_version }}.deb
 
     - name: Derive nix flake reference
       ansible.builtin.set_fact:

@@ -152,6 +152,8 @@
     - docker
 
 - name: Register the CopyQ PPA repository
+  when: common_install_copyq
+
   block:
     - name: Ensure the APT keyrings directory exists for CopyQ
       ansible.builtin.file:
@@ -175,7 +177,25 @@
         group: root
         mode: "0644"
         force: true
+      register: apt_repositories_copyq_key_fetch
+      failed_when: false
       when: common_install_copyq
+      tags:
+        - packages
+        - system
+        - repos
+        - copyq
+
+    - name: Warn when CopyQ PPA signing key could not be refreshed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not refresh the CopyQ PPA key from keyserver.ubuntu.com.
+          Continuing bootstrap with the currently available keyring file.
+          Details: {{ apt_repositories_copyq_key_fetch.msg | default('no error message provided') }}
+      when:
+        - common_install_copyq
+        - apt_repositories_copyq_key_fetch is defined
+        - apt_repositories_copyq_key_fetch.failed | default(false)
       tags:
         - packages
         - system
@@ -199,8 +219,6 @@
       tags:
         - repos
         - copyq
-  when: common_install_copyq
-
 - name: Install the Git Core PPA signing key into a dedicated keyring
   ansible.builtin.get_url:
     url: >-
@@ -210,9 +228,28 @@
     group: root
     mode: "0644"
     force: true
+  register: apt_repositories_git_core_key_fetch
+  failed_when: false
   when:
     - ansible_distribution in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
+  tags:
+    - packages
+    - system
+    - repos
+    - git
+
+- name: Warn when Git Core PPA signing key could not be refreshed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Could not refresh the Git Core PPA key from keyserver.ubuntu.com.
+      Continuing bootstrap with the currently available keyring file.
+      Details: {{ apt_repositories_git_core_key_fetch.msg | default('no error message provided') }}
+  when:
+    - ansible_distribution in supported_distributions
+    - not common_selective_feature_run or common_enable_git_credential_oauth
+    - apt_repositories_git_core_key_fetch is defined
+    - apt_repositories_git_core_key_fetch.failed | default(false)
   tags:
     - packages
     - system
@@ -245,6 +282,8 @@
 - name: Update apt cache after adding external repositories
   ansible.builtin.apt:
     update_cache: true
+  register: apt_repositories_apt_cache_update
+  failed_when: false
   when: >-
     common_enable_vscode
     or common_enable_brave
@@ -256,6 +295,20 @@
       and (not common_selective_feature_run or common_enable_git_credential_oauth)
     )
   changed_when: false
+  tags:
+    - packages
+    - system
+    - repos
+
+- name: Warn when apt cache update fails and continue
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: apt cache update failed, so package metadata may be stale for this run.
+      Bootstrap will continue.
+      Details: {{ apt_repositories_apt_cache_update.msg | default('no error message provided') }}
+  when:
+    - apt_repositories_apt_cache_update is defined
+    - apt_repositories_apt_cache_update.failed | default(false)
   tags:
     - packages
     - system
