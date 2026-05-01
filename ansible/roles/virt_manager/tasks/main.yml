@@ -5,7 +5,24 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+  register: virt_manager_package_install
+  failed_when: false
   when: common_enable_virt_manager
+  tags:
+    - virt-manager
+    - virtualization
+
+- name: Warn when virt-manager package installation fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not install one or more virt-manager/libvirt packages.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ virt_manager_package_install.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_virt_manager
+    - virt_manager_package_install is defined
+    - virt_manager_package_install.failed | default(false)
   tags:
     - virt-manager
     - virtualization
@@ -15,7 +32,26 @@
     name: libvirtd
     enabled: true
     state: started
-  when: common_enable_virt_manager
+  register: virt_manager_libvirtd_state
+  failed_when: false
+  when:
+    - common_enable_virt_manager
+    - not (virt_manager_package_install is defined and virt_manager_package_install.failed | default(false))
+  tags:
+    - virt-manager
+    - virtualization
+
+- name: Warn when libvirtd startup fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not enable or start libvirtd.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ virt_manager_libvirtd_state.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_virt_manager
+    - virt_manager_libvirtd_state is defined
+    - virt_manager_libvirtd_state.failed | default(false)
   tags:
     - virt-manager
     - virtualization

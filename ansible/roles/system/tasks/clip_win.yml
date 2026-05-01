@@ -26,6 +26,21 @@
     dest: "/tmp/clip-win_{{ clip_win_version }}_{{ common_deb_arch }}.deb"
     mode: "0644"
     checksum: "{{ common_clip_win_deb_checksum }}"
+  register: system_clip_win_package_download
+  failed_when: false
+  tags:
+    - clip-win
+
+- name: Warn when Clip-Win package download fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not download the Clip-Win Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ system_clip_win_package_download.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - system_clip_win_package_download is defined
+    - system_clip_win_package_download.failed | default(false)
   tags:
     - clip-win
 
@@ -33,6 +48,32 @@
   ansible.builtin.apt:
     deb: "/tmp/clip-win_{{ clip_win_version }}_{{ common_deb_arch }}.deb"
     state: present
+  register: system_clip_win_package_install
+  failed_when: false
+  tags:
+    - clip-win
+
+- name: Warn when Clip-Win installation fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not install Clip-Win from the pinned Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ system_clip_win_package_install.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - system_clip_win_package_install is defined
+    - system_clip_win_package_install.failed | default(false)
+  tags:
+    - clip-win
+
+- name: Inform when Clip-Win setup is skipped because package installation failed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Skipping Clip-Win desktop integration because the package could not be installed.
+  when:
+    - system_clip_win_package_install is defined
+    - system_clip_win_package_install.failed | default(false)
+  changed_when: false
   tags:
     - clip-win
 
@@ -42,6 +83,7 @@
     state: directory
     mode: "0700"
   become: false
+  when: not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   tags:
     - clip-win
 
@@ -52,6 +94,7 @@
       {"setupComplete":true,"setupDate":"{{ ansible_date_time.iso8601 }}"}
     mode: "0600"
   become: false
+  when: not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   tags:
     - clip-win
 
@@ -61,6 +104,7 @@
     state: directory
     mode: "0700"
   become: false
+  when: not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   tags:
     - clip-win
 
@@ -82,6 +126,7 @@
       StartupNotify=false
       X-GNOME-Autostart-enabled=true
   become: false
+  when: not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   tags:
     - clip-win
 
@@ -89,6 +134,7 @@
   ansible.builtin.stat:
     path: /dev/uinput
   register: system_clip_win_uinput_device
+  when: not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   tags:
     - clip-win
 
@@ -99,7 +145,9 @@
       - -m
       - "u:{{ local_user }}:rw"
       - /dev/uinput
-  when: system_clip_win_uinput_device.stat.exists
+  when:
+    - system_clip_win_uinput_device is defined
+    - system_clip_win_uinput_device.stat.exists
   changed_when: false
   tags:
     - clip-win
@@ -109,7 +157,9 @@
     path: "{{ local_home }}/.config/cosmic/com.system76.CosmicSettings.Shortcuts/v1"
     state: directory
     mode: "0700"
-  when: common_clip_win_is_cosmic
+  when:
+    - common_clip_win_is_cosmic
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   become: false
   tags:
     - clip-win
@@ -147,8 +197,22 @@
     mv "$tmp_file" "$shortcut_file"
   args:
     executable: /bin/bash
-  when: common_clip_win_is_cosmic
+  when:
+    - common_clip_win_is_cosmic
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
   become: false
+  changed_when: false
+  tags:
+    - clip-win
+
+- name: Report when GNOME shortcut integration is skipped due missing desktop session environment
+  ansible.builtin.debug:
+    msg: >-
+      Skipping GNOME Clip-Win shortcut integration because DBUS_SESSION_BUS_ADDRESS is not available.
+  when:
+    - common_clip_win_is_gnome_family
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
+    - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length == 0
   changed_when: false
   tags:
     - clip-win
@@ -161,14 +225,31 @@
       - org.gnome.shell.keybindings
       - toggle-message-tray
       - "['<Super><Shift>v']"
+  register: system_clip_win_gnome_message_tray_binding
+  failed_when: false
   environment:
     DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
     DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
     XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
   when:
     - common_clip_win_is_gnome_family
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
+  changed_when: false
+  tags:
+    - clip-win
+
+- name: Warn when GNOME notification center shortcut remap fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not set org.gnome.shell.keybindings.toggle-message-tray for Clip-Win.
+      Bootstrap will continue.
+      Details: {{ system_clip_win_gnome_message_tray_binding.stderr | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - system_clip_win_gnome_message_tray_binding is defined
+    - system_clip_win_gnome_message_tray_binding.failed | default(false)
   changed_when: false
   tags:
     - clip-win
@@ -181,14 +262,31 @@
       - org.gnome.shell.keybindings
       - toggle-quick-settings
       - "[]"
+  register: system_clip_win_gnome_quick_settings_binding
+  failed_when: false
   environment:
     DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
     DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
     XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
   when:
     - common_clip_win_is_gnome_family
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
+  changed_when: false
+  tags:
+    - clip-win
+
+- name: Warn when GNOME quick settings shortcut remap fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not set org.gnome.shell.keybindings.toggle-quick-settings for Clip-Win.
+      Bootstrap will continue.
+      Details: {{ system_clip_win_gnome_quick_settings_binding.stderr | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - system_clip_win_gnome_quick_settings_binding is defined
+    - system_clip_win_gnome_quick_settings_binding.failed | default(false)
   changed_when: false
   tags:
     - clip-win
@@ -217,10 +315,27 @@
     DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
     DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
     XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+  register: system_clip_win_gnome_custom_shortcut
+  failed_when: false
   when:
     - common_clip_win_is_gnome_family
+    - not (system_clip_win_package_install is defined and system_clip_win_package_install.failed | default(false))
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
+  changed_when: false
+  tags:
+    - clip-win
+
+- name: Warn when GNOME custom shortcut registration fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not register the Clip-Win custom GNOME shortcut.
+      Bootstrap will continue.
+      Details: {{ system_clip_win_gnome_custom_shortcut.stderr | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - system_clip_win_gnome_custom_shortcut is defined
+    - system_clip_win_gnome_custom_shortcut.failed | default(false)
   changed_when: false
   tags:
     - clip-win

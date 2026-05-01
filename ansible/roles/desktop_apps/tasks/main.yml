@@ -22,7 +22,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
   tags:
     - applications
     - vscode
@@ -33,7 +33,7 @@
   register: desktop_apps_vscode_argv_stat
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
   tags:
     - applications
     - vscode
@@ -41,7 +41,7 @@
 - name: Load current VS Code runtime arguments
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
   tags:
     - applications
@@ -75,7 +75,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
     - desktop_apps_vscode_argv_has_password_store | default(false)
   tags:
@@ -91,7 +91,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
     - desktop_apps_vscode_argv_stat.stat.exists
     - not (desktop_apps_vscode_argv_has_password_store | default(false))
   tags:
@@ -110,7 +110,7 @@
   become_user: "{{ local_user }}"
   when:
     - common_enable_vscode
-    - ansible_distribution in ['Pop!_OS', 'Ubuntu']
+    - ansible_facts['distribution'] in ['Pop!_OS', 'Ubuntu']
     - not desktop_apps_vscode_argv_stat.stat.exists
   tags:
     - applications
@@ -158,6 +158,22 @@
   vars:
     rustdesk_package_filename: >-
       rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
+  register: desktop_apps_rustdesk_package_download
+  failed_when: false
+  tags:
+    - applications
+    - rustdesk
+
+- name: Warn when RustDesk package download fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not download the RustDesk Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ desktop_apps_rustdesk_package_download.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - desktop_apps_rustdesk_package_download is defined
+    - desktop_apps_rustdesk_package_download.failed | default(false)
   tags:
     - applications
     - rustdesk
@@ -170,6 +186,22 @@
   vars:
     rustdesk_package_filename: >-
       rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
+  register: desktop_apps_rustdesk_package_install
+  failed_when: false
+  tags:
+    - applications
+    - rustdesk
+
+- name: Warn when RustDesk package installation fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not install RustDesk from the pinned Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ desktop_apps_rustdesk_package_install.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - desktop_apps_rustdesk_package_install is defined
+    - desktop_apps_rustdesk_package_install.failed | default(false)
   tags:
     - applications
     - rustdesk
@@ -180,6 +212,24 @@
     enabled: true
     state: started
     daemon_reload: true
+  register: desktop_apps_rustdesk_service_state
+  failed_when: false
+  when: not (desktop_apps_rustdesk_package_install is defined and desktop_apps_rustdesk_package_install.failed |
+    default(false))
+  tags:
+    - applications
+    - rustdesk
+
+- name: Warn when RustDesk service startup fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not enable or start the RustDesk service.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ desktop_apps_rustdesk_service_state.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - desktop_apps_rustdesk_service_state is defined
+    - desktop_apps_rustdesk_service_state.failed | default(false)
   tags:
     - applications
     - rustdesk

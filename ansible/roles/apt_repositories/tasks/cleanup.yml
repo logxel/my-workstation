@@ -53,7 +53,7 @@
       - git-core-ubuntu-ppa-*.sources
   register: apt_repositories_git_core_ppa_legacy_sources
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
   tags:
     - repos
@@ -65,7 +65,7 @@
     state: absent
   loop: "{{ apt_repositories_git_core_ppa_legacy_sources.files }}"
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
     - apt_repositories_git_core_ppa_legacy_sources.matched | default(0) > 0
   tags:
@@ -77,7 +77,7 @@
     path: /etc/apt/sources.list.d/ppa_git_core_ppa_noble.list
     state: absent
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
   tags:
     - repos

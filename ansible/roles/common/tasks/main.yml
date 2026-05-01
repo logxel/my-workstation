@@ -6,8 +6,8 @@
     - name: Ensure this playbook only runs on Debian-derived hosts
       ansible.builtin.assert:
         that:
-          - ansible_os_family == 'Debian'
-          - ansible_distribution in supported_distributions
+          - ansible_facts['os_family'] == 'Debian'
+          - ansible_facts['distribution'] in supported_distributions
         fail_msg: This repository targets Pop!_OS and other Ubuntu-derived hosts.
 
     - name: Merge feature flag overrides with defaults
@@ -207,13 +207,13 @@
 
     - name: Derive host package and platform facts
       ansible.builtin.set_fact:
-        common_deb_arch: "{{ deb_arch_map.get(ansible_architecture, 'amd64') }}"
+        common_deb_arch: "{{ deb_arch_map.get(ansible_facts['architecture'], 'amd64') }}"
         common_ubuntu_codename: >-
           {{
-            ansible_lsb.codename
-            | default(ansible_distribution_release, true)
+            ansible_facts.get('lsb', {}).get('codename')
+            | default(ansible_facts['distribution_release'], true)
           }}
-        common_host_nix_system: "{{ nix_system_map.get(ansible_architecture, 'x86_64-linux') }}"
+        common_host_nix_system: "{{ nix_system_map.get(ansible_facts['architecture'], 'x86_64-linux') }}"
         common_home_manager_activation_link: "{{ local_home }}/.cache/home-manager-activation"
         common_nix_profiles_dir: "{{ local_home }}/.local/state/nix/profiles"
         common_home_manager_profile_path: >-
@@ -268,7 +268,7 @@
             | lower
             | trim
           }}
-        common_is_pop_desktop_host: "{{ ansible_distribution == 'Pop!_OS' }}"
+        common_is_pop_desktop_host: "{{ ansible_facts['distribution'] == 'Pop!_OS' }}"
 
     - name: Derive Clip-Win release facts
       ansible.builtin.set_fact:
@@ -362,7 +362,7 @@
           }}
         common_flatpak_apps: >-
           {{
-            ([] if common_selective_feature_run else distro_flatpak_apps.get(ansible_distribution, []))
+            ([] if common_selective_feature_run else distro_flatpak_apps.get(ansible_facts['distribution'], []))
             + ([ 'org.mozilla.Thunderbird' ] if common_feature_mode_thunderbird != 'disabled' else [])
           }}
         common_enable_file_manager_integration: >-
@@ -439,7 +439,7 @@
           }}
         common_apt_desktop_packages: >-
           {{
-            distro_desktop_packages.get(ansible_distribution, [])
+            distro_desktop_packages.get(ansible_facts['distribution'], [])
             if (
               common_feature_mode_desktop_tools == 'enabled'
               or (common_feature_mode_desktop_tools == 'auto' and common_has_gnome_desktop)

@@ -32,7 +32,27 @@
     group: root
     mode: "0644"
     force: true
+  register: apt_repositories_microsoft_key_fetch
+  failed_when: false
   when: common_enable_vscode or common_enable_edge
+  tags:
+    - packages
+    - system
+    - repos
+    - vscode
+    - edge
+
+- name: Warn when Microsoft APT signing key could not be refreshed # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not refresh the Microsoft APT key.
+      VS Code/Edge repository operations will continue, but package installs may fail later.
+      Details: {{ apt_repositories_microsoft_key_fetch.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_vscode or common_enable_edge
+    - apt_repositories_microsoft_key_fetch is defined
+    - apt_repositories_microsoft_key_fetch.failed | default(false)
   tags:
     - packages
     - system
@@ -53,7 +73,24 @@
       - https://packages.microsoft.com/repos/code
       - stable
       - main
+  register: apt_repositories_vscode_repo_render
+  failed_when: false
   when: common_enable_vscode
+  tags:
+    - repos
+    - vscode
+
+- name: Warn when VS Code repository definition could not be rendered # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not render the VS Code repository definition.
+      Bootstrap will continue without failing the run.
+      Details: {{ apt_repositories_vscode_repo_render.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_vscode
+    - apt_repositories_vscode_repo_render is defined
+    - apt_repositories_vscode_repo_render.failed | default(false)
   tags:
     - repos
     - vscode
@@ -71,7 +108,26 @@
       - https://packages.microsoft.com/repos/edge
       - stable
       - main
+  register: apt_repositories_edge_repo_render
+  failed_when: false
   when: common_enable_edge
+  tags:
+    - packages
+    - system
+    - repos
+    - edge
+
+- name: Warn when Microsoft Edge repository definition could not be rendered # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not render the Microsoft Edge repository definition.
+      Bootstrap will continue without failing the run.
+      Details: {{ apt_repositories_edge_repo_render.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_edge
+    - apt_repositories_edge_repo_render is defined
+    - apt_repositories_edge_repo_render.failed | default(false)
   tags:
     - packages
     - system
@@ -91,7 +147,24 @@
   ansible.builtin.apt_key:
     url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
     state: present
+  register: apt_repositories_brave_key_add
+  failed_when: false
   when: common_enable_brave
+  tags:
+    - repos
+    - brave
+
+- name: Warn when Brave APT signing key could not be refreshed # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not refresh the Brave APT key.
+      Brave repository operations will continue, but package installs may fail later.
+      Details: {{ apt_repositories_brave_key_add.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_brave
+    - apt_repositories_brave_key_add is defined
+    - apt_repositories_brave_key_add.failed | default(false)
   tags:
     - repos
     - brave
@@ -102,7 +175,24 @@
     state: present
     filename: brave-browser-release
     update_cache: false
+  register: apt_repositories_brave_repo_register
+  failed_when: false
   when: common_enable_brave
+  tags:
+    - repos
+    - brave
+
+- name: Warn when Brave repository registration fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not register the Brave repository.
+      Bootstrap will continue without failing the run.
+      Details: {{ apt_repositories_brave_repo_register.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_brave
+    - apt_repositories_brave_repo_register is defined
+    - apt_repositories_brave_repo_register.failed | default(false)
   tags:
     - repos
     - brave
@@ -124,7 +214,26 @@
     group: root
     mode: "0644"
     force: true
+  register: apt_repositories_docker_key_fetch
+  failed_when: false
   when: common_enable_docker
+  tags:
+    - packages
+    - system
+    - repos
+    - docker
+
+- name: Warn when Docker APT signing key could not be refreshed # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not refresh the Docker APT key.
+      Docker repository operations will continue, but package installs may fail later.
+      Details: {{ apt_repositories_docker_key_fetch.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_docker
+    - apt_repositories_docker_key_fetch is defined
+    - apt_repositories_docker_key_fetch.failed | default(false)
   tags:
     - packages
     - system
@@ -144,7 +253,26 @@
       - https://download.docker.com/linux/ubuntu
       - "{{ common_ubuntu_codename }}"
       - stable
+  register: apt_repositories_docker_repo_render
+  failed_when: false
   when: common_enable_docker
+  tags:
+    - packages
+    - system
+    - repos
+    - docker
+
+- name: Warn when Docker repository definition could not be rendered # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not render the Docker repository definition.
+      Bootstrap will continue without failing the run.
+      Details: {{ apt_repositories_docker_repo_render.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_docker
+    - apt_repositories_docker_repo_render is defined
+    - apt_repositories_docker_repo_render.failed | default(false)
   tags:
     - packages
     - system
@@ -186,12 +314,13 @@
         - repos
         - copyq
 
-    - name: Warn when CopyQ PPA signing key could not be refreshed
-      ansible.builtin.debug:
+    - name: Warn when CopyQ PPA signing key could not be refreshed # noqa: ignore-errors
+      ansible.builtin.fail:
         msg: >-
           WARNING: Could not refresh the CopyQ PPA key from keyserver.ubuntu.com.
           Continuing bootstrap with the currently available keyring file.
           Details: {{ apt_repositories_copyq_key_fetch.msg | default('no error message provided') }}
+      ignore_errors: true
       when:
         - common_install_copyq
         - apt_repositories_copyq_key_fetch is defined
@@ -231,7 +360,7 @@
   register: apt_repositories_git_core_key_fetch
   failed_when: false
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
   tags:
     - packages
@@ -239,14 +368,15 @@
     - repos
     - git
 
-- name: Warn when Git Core PPA signing key could not be refreshed
-  ansible.builtin.debug:
+- name: Warn when Git Core PPA signing key could not be refreshed # noqa: ignore-errors
+  ansible.builtin.fail:
     msg: >-
       WARNING: Could not refresh the Git Core PPA key from keyserver.ubuntu.com.
       Continuing bootstrap with the currently available keyring file.
       Details: {{ apt_repositories_git_core_key_fetch.msg | default('no error message provided') }}
+  ignore_errors: true
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
     - apt_repositories_git_core_key_fetch is defined
     - apt_repositories_git_core_key_fetch.failed | default(false)
@@ -271,7 +401,7 @@
       - "{{ common_ubuntu_codename }}"
       - main
   when:
-    - ansible_distribution in supported_distributions
+    - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
   tags:
     - packages
@@ -291,7 +421,7 @@
     or common_enable_edge
     or common_install_copyq
     or (
-      ansible_distribution in supported_distributions
+      ansible_facts['distribution'] in supported_distributions
       and (not common_selective_feature_run or common_enable_git_credential_oauth)
     )
   changed_when: false
@@ -300,12 +430,13 @@
     - system
     - repos
 
-- name: Warn when apt cache update fails and continue
-  ansible.builtin.debug:
+- name: Warn when apt cache update fails and continue # noqa: ignore-errors
+  ansible.builtin.fail:
     msg: >-
       WARNING: apt cache update failed, so package metadata may be stale for this run.
       Bootstrap will continue.
       Details: {{ apt_repositories_apt_cache_update.msg | default('no error message provided') }}
+  ignore_errors: true
   when:
     - apt_repositories_apt_cache_update is defined
     - apt_repositories_apt_cache_update.failed | default(false)

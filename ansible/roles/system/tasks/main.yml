@@ -171,7 +171,25 @@
     mode: "0644"
     force: false
     checksum: "{{ common_gcm_deb_checksum if common_gcm_deb_checksum | length > 0 else omit }}"
+  register: system_gcm_package_download
+  failed_when: false
   when: common_enable_git_credential_oauth
+  tags:
+    - packages
+    - system
+    - git
+
+- name: Warn when Git Credential Manager package download fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not download the Git Credential Manager Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ system_gcm_package_download.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_git_credential_oauth
+    - system_gcm_package_download is defined
+    - system_gcm_package_download.failed | default(false)
   tags:
     - packages
     - system
@@ -182,7 +200,25 @@
     deb: "/tmp/{{ common_gcm_package_filename }}"
     state: present
     update_cache: true
+  register: system_gcm_package_install
+  failed_when: false
   when: common_enable_git_credential_oauth
+  tags:
+    - packages
+    - system
+    - git
+
+- name: Warn when Git Credential Manager package installation fails # noqa: ignore-errors
+  ansible.builtin.fail:
+    msg: >-
+      WARNING: Could not install Git Credential Manager from the pinned Debian package.
+      Bootstrap will continue without failing this optional feature.
+      Details: {{ system_gcm_package_install.msg | default('no error message provided') }}
+  ignore_errors: true
+  when:
+    - common_enable_git_credential_oauth
+    - system_gcm_package_install is defined
+    - system_gcm_package_install.failed | default(false)
   tags:
     - packages
     - system
@@ -197,7 +233,9 @@
     mode: "0644"
   become: true
   become_user: "{{ local_user }}"
-  when: common_enable_git_credential_oauth
+  when:
+    - common_enable_git_credential_oauth
+    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
   tags:
     - packages
     - system
@@ -216,7 +254,24 @@
     mode: "0644"
   become: true
   become_user: "{{ local_user }}"
-  when: common_enable_git_credential_oauth
+  when:
+    - common_enable_git_credential_oauth
+    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
+  tags:
+    - packages
+    - system
+    - git
+
+- name: Warn when Git config update is skipped because Git Credential Manager failed to install
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Skipping Git credential helper configuration because Git Credential Manager
+      could not be installed in this run.
+  when:
+    - common_enable_git_credential_oauth
+    - system_gcm_package_install is defined
+    - system_gcm_package_install.failed | default(false)
+  changed_when: false
   tags:
     - packages
     - system
