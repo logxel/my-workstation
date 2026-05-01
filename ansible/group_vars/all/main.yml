@@ -67,14 +67,11 @@ office_suite_package_candidates:
   - calligra
   - abiword
   - gnumeric
-# Set to a pinned version (recommended) or "latest" to resolve from GitHub at runtime.
-gcm_version: "2.7.3"
+# Set to a pinned version or "latest" to resolve release URL and SHA-256 from GitHub metadata.
+gcm_version: "latest"
 gcm_release_arch_map:
   amd64: x64
   arm64: arm64
-gcm_release_deb_checksums:
-  amd64: "sha256:a5431e1b6f25aa8b424e747d880f86e74c739ad52e72c924a7b1a25d87ac7e72"
-  arm64: "sha256:f5995901ef3a2ffc4442e4a9a92c8dfdc8f1df1affe8ef1d037b7ad3302b923b"
 apt_base_packages:
   - ca-certificates
   - curl
@@ -105,10 +102,8 @@ distro_flatpak_apps:
     - com.valvesoftware.Steam
     - org.videolan.VLC
 rustdesk_version: "1.4.6"
-clip_win_version: "0.6.5-patched.2"
-clip_win_release_deb_checksums:
-  amd64: "sha256:63a7824ad84b3fe6c8a6328982c72a703f177ec768ccd474ebdbc762bc7b20fd"
-  arm64: "sha256:92f5e8395849e7e8c55e582fca35bf777d54426e25ec441382a98ffa8a913170"
+# Set to a pinned version or "latest" to resolve release URL and SHA-256 from GitHub metadata.
+clip_win_version: "latest"
 rustdesk_release_arch_map:
   amd64: x86_64
   arm64: aarch64

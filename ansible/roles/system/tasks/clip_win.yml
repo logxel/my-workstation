@@ -20,10 +20,10 @@
     - clip-win
     - copyq
 
-- name: Download pinned Clip-Win release package
+- name: Download the resolved Clip-Win release package
   ansible.builtin.get_url:
     url: "{{ common_clip_win_deb_url }}"
-    dest: "/tmp/clip-win_{{ clip_win_version }}_{{ common_deb_arch }}.deb"
+    dest: "/tmp/{{ common_clip_win_package_filename }}"
     mode: "0644"
     checksum: "{{ common_clip_win_deb_checksum }}"
   register: system_clip_win_package_download
@@ -44,9 +44,9 @@
   tags:
     - clip-win
 
-- name: Install Clip-Win from the pinned GitHub release
+- name: Install Clip-Win from the resolved GitHub release
   ansible.builtin.apt:
-    deb: "/tmp/clip-win_{{ clip_win_version }}_{{ common_deb_arch }}.deb"
+    deb: "/tmp/{{ common_clip_win_package_filename }}"
     state: present
   register: system_clip_win_package_install
   failed_when: false

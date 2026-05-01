@@ -270,35 +270,94 @@
           }}
         common_is_pop_desktop_host: "{{ ansible_facts['distribution'] == 'Pop!_OS' }}"
 
-    - name: Derive Clip-Win release facts
-      ansible.builtin.set_fact:
-        common_clip_win_deb_checksum: >-
-          {{ clip_win_release_deb_checksums.get(common_deb_arch, '') }}
-        common_clip_win_deb_url: >-
-          https://github.com/techlogycs/clip-win/releases/download/v{{
-          clip_win_version }}/clip-win_{{ clip_win_version }}_{{ common_deb_arch
-          }}.deb
-
-    - name: Fetch latest Git Credential Manager release metadata
+    - name: Fetch Clip-Win release metadata
       ansible.builtin.uri:
-        url: https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest
+        url: >-
+          {{
+            'https://api.github.com/repos/techlogycs/clip-win/releases/latest'
+            if clip_win_version == 'latest'
+            else 'https://api.github.com/repos/techlogycs/clip-win/releases/tags/v'
+              ~ (clip_win_version | regex_replace('^v', ''))
+          }}
         method: GET
         return_content: true
         status_code: 200
-      register: common_gcm_latest_api_response
-      when: gcm_version == 'latest'
+      register: common_clip_win_release_api_response
+
+    - name: Resolve Clip-Win release version
+      ansible.builtin.set_fact:
+        common_clip_win_resolved_version: >-
+          {{
+            (
+              common_clip_win_release_api_response.json.tag_name
+              | default('')
+              | regex_replace('^v', '')
+            )
+            if clip_win_version == 'latest'
+            else (clip_win_version | regex_replace('^v', ''))
+          }}
+
+    - name: Ensure Clip-Win release version is resolved
+      ansible.builtin.assert:
+        that:
+          - common_clip_win_resolved_version | length > 0
+        fail_msg: Could not resolve a valid Clip-Win release version.
+
+    - name: Derive Clip-Win package filename
+      ansible.builtin.set_fact:
+        common_clip_win_package_filename: >-
+          clip-win_{{ common_clip_win_resolved_version }}_{{ common_deb_arch }}.deb
+
+    - name: Derive Clip-Win release facts
+      ansible.builtin.set_fact:
+        common_clip_win_deb_checksum: >-
+          {{
+            (
+              common_clip_win_release_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_clip_win_package_filename)
+              | map(attribute='digest')
+              | first
+            )
+            | default('')
+          }}
+        common_clip_win_deb_url: >-
+          {{
+            (
+              common_clip_win_release_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_clip_win_package_filename)
+              | map(attribute='browser_download_url')
+              | first
+            )
+            | default('')
+          }}
+
+    - name: Fetch Git Credential Manager release metadata
+      ansible.builtin.uri:
+        url: >-
+          {{
+            'https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest'
+            if gcm_version == 'latest'
+            else 'https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/tags/v'
+              ~ (gcm_version | regex_replace('^v', ''))
+          }}
+        method: GET
+        return_content: true
+        status_code: 200
+      register: common_gcm_release_api_response
 
     - name: Resolve Git Credential Manager release version
       ansible.builtin.set_fact:
         common_gcm_resolved_version: >-
           {{
             (
-              common_gcm_latest_api_response.json.tag_name
+              common_gcm_release_api_response.json.tag_name
               | default('')
               | regex_replace('^v', '')
             )
             if gcm_version == 'latest'
-            else gcm_version
+            else (gcm_version | regex_replace('^v', ''))
           }}
 
     - name: Ensure Git Credential Manager release version is resolved
@@ -307,19 +366,38 @@
           - common_gcm_resolved_version | length > 0
         fail_msg: Could not resolve a valid Git Credential Manager release version.
 
+    - name: Derive Git Credential Manager package filename
+      ansible.builtin.set_fact:
+        common_gcm_package_filename: >-
+          gcm-linux-{{ gcm_release_arch_map.get(common_deb_arch, '') }}-{{
+          common_gcm_resolved_version }}.deb
+
     - name: Derive Git Credential Manager release facts
       ansible.builtin.set_fact:
         common_gcm_release_arch: >-
           {{ gcm_release_arch_map.get(common_deb_arch, '') }}
         common_gcm_deb_checksum: >-
-          {{ '' if gcm_version == 'latest' else gcm_release_deb_checksums.get(common_deb_arch, '') }}
-        common_gcm_package_filename: >-
-          gcm-linux-{{ gcm_release_arch_map.get(common_deb_arch, '') }}-{{
-          common_gcm_resolved_version }}.deb
+          {{
+            (
+              common_gcm_release_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_gcm_package_filename)
+              | map(attribute='digest')
+              | first
+            )
+            | default('')
+          }}
         common_gcm_deb_url: >-
-          https://github.com/git-ecosystem/git-credential-manager/releases/download/v{{
-          common_gcm_resolved_version }}/gcm-linux-{{
-          gcm_release_arch_map.get(common_deb_arch, '') }}-{{ common_gcm_resolved_version }}.deb
+          {{
+            (
+              common_gcm_release_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_gcm_package_filename)
+              | map(attribute='browser_download_url')
+              | first
+            )
+            | default('')
+          }}
 
     - name: Derive nix flake reference
       ansible.builtin.set_fact:
