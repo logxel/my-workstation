@@ -146,6 +146,8 @@ in
         theme = "robbyrussell";
       };
       shellAliases = {
+        # nix home manager new magic shortcut to apply it in one command after updating this configuration:
+        hms = "nix run .#homeConfigurations.$(whoami).activationPackage";
         ll = "ls -lah";
         copilot = "${lib.getExe pkgs.github-copilot-cli}";
         cargo-release = "CARGO_INCREMENTAL=0 RUSTFLAGS='-C target-cpu=native -C codegen-units=1' cargo build --release";
@@ -170,6 +172,7 @@ in
     github-copilot-cli
     nodejs_24
     ripgrep
+    opencode
     uv
     warp-terminal
   ];
