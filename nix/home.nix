@@ -142,7 +142,7 @@ in
       syntaxHighlighting.enable = true;
       oh-my-zsh = {
         enable = true;
-        plugins = [ "git" "direnv" ];
+        plugins = [ "git"];
         theme = "robbyrussell";
       };
       shellAliases = {
