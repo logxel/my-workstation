@@ -25,6 +25,9 @@
       homeDirectory =
         let value = builtins.getEnv "DOTFILES_HOME";
         in if value != "" then value else "/home/${username}";
+      homeManagerProfileName =
+        let value = builtins.getEnv "DOTFILES_HOME_MANAGER_PROFILE_NAME";
+        in if value != "" then value else "my-workstation-home-manager";
       editorCommand =
         let value = builtins.getEnv "DOTFILES_EDITOR";
         in if value != "" then value else "code --wait";
@@ -36,7 +39,7 @@
         home-manager.lib.homeManagerConfiguration {
           pkgs = mkPkgs system;
           extraSpecialArgs = {
-            inherit username homeDirectory editorCommand;
+            inherit username homeDirectory editorCommand homeManagerProfileName;
           };
           modules = [ ./home.nix ];
         };

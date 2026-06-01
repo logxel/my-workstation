@@ -1,4 +1,4 @@
-{ lib, pkgs, username, homeDirectory, editorCommand, ... }:
+{ lib, pkgs, username, homeDirectory, editorCommand, homeManagerProfileName, ... }:
 
 let
   cleanupPolicy = {
@@ -121,6 +121,71 @@ let
     exec ${lib.getExe pkgs.bun} "$@"
   '';
 
+  hmsScript = pkgs.writeShellApplication {
+    name = "hms";
+    runtimeInputs = with pkgs; [ coreutils nix ];
+    text = ''
+      set -Eeuo pipefail
+
+      source_nix_profile() {
+        if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+          # Multi-user installs expose nix through the daemon profile script.
+          # shellcheck disable=SC1091
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+        elif [[ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+          # Single-user installs expose nix through the user profile script.
+          # shellcheck disable=SC1091
+          . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+        fi
+      }
+
+      source_nix_profile
+
+      if ! command -v nix >/dev/null 2>&1; then
+        echo "Unable to locate nix; source your Nix profile first." >&2
+        exit 1
+      fi
+
+      system="''${NIX_SYSTEM:-$(nix eval --impure --raw --expr builtins.currentSystem 2>/dev/null || true)}"
+      if [[ -z "$system" ]]; then
+        case "$(uname -m)" in
+          x86_64)
+            system="x86_64-linux"
+            ;;
+          aarch64)
+            system="aarch64-linux"
+            ;;
+          *)
+            echo "Unable to detect the Nix system for Home Manager." >&2
+            exit 1
+            ;;
+        esac
+      fi
+
+      repo_root="''${DOTFILES_REPO:-${homeDirectory}/my-workstation}"
+      profile_path="${homeDirectory}/.local/state/nix/profiles/${homeManagerProfileName}"
+      activation_link="${homeDirectory}/.cache/home-manager-activation"
+
+      mkdir -p "${homeDirectory}/.cache" "${homeDirectory}/.local/state/nix/profiles"
+
+      DOTFILES_USER="${username}" \
+      DOTFILES_HOME="${homeDirectory}" \
+      NIX_SYSTEM="$system" \
+      nix build --impure --extra-experimental-features 'nix-command flakes' \
+        "$repo_root/nix#homeConfigurations.$system.activationPackage" \
+        --out-link "$activation_link"
+
+      current_generation="$(readlink -f "$profile_path" 2>/dev/null || true)"
+      new_generation="$(readlink -f "$activation_link" 2>/dev/null || true)"
+
+      if [[ -n "$new_generation" && "$current_generation" != "$new_generation" ]]; then
+        nix-env --profile "$profile_path" --set "$new_generation"
+      fi
+
+      "$profile_path/activate" --driver-version 1
+    '';
+  };
+
 in
 {
   home = {
@@ -140,14 +205,19 @@ in
       autosuggestion.enable = true;
       enableCompletion = true;
       syntaxHighlighting.enable = true;
+      initContent = lib.mkBefore ''
+        if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+          . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+        elif [[ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+          . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+        fi
+      '';
       oh-my-zsh = {
         enable = true;
         plugins = [ "git"];
         theme = "robbyrussell";
       };
       shellAliases = {
-        # nix home manager new magic shortcut to apply it in one command after updating this configuration:
-        hms = "nix run .#homeConfigurations.$(whoami).activationPackage";
         ll = "ls -lah";
         copilot = "${lib.getExe pkgs.github-copilot-cli}";
         cargo-release = "CARGO_INCREMENTAL=0 RUSTFLAGS='-C target-cpu=native -C codegen-units=1' cargo build --release";
@@ -189,6 +259,7 @@ in
   };
 
   home.sessionPath = [
+    "${homeDirectory}/.bun/bin"
     "${homeDirectory}/.local/bin"
   ];
 
@@ -210,6 +281,11 @@ in
   home.file.".local/bin/pnpm" = {
     executable = true;
     source = pnpmCompatScript;
+  };
+
+  home.file.".local/bin/hms" = {
+    executable = true;
+    source = hmsScript;
   };
 
   home.activation.createBuildCaches = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

@@ -162,6 +162,7 @@
   environment:
     DOTFILES_USER: "{{ local_user }}"
     DOTFILES_HOME: "{{ local_home }}"
+    DOTFILES_HOME_MANAGER_PROFILE_NAME: "{{ nix_home_manager_profile_name }}"
     NIX_SYSTEM: "{{ common_host_nix_system }}"
   changed_when: false
   when: common_enable_nix
@@ -202,12 +203,18 @@
 
     current_generation="$(readlink -f '{{ common_home_manager_profile_path }}' 2>/dev/null || true)"
     new_generation="$(readlink -f '{{ common_home_manager_activation_link }}' 2>/dev/null || true)"
+    profile_updated=0
 
     if [[ -n "$new_generation" && "$current_generation" != "$new_generation" ]]; then
       nix-env --profile '{{ common_home_manager_profile_path }}' --set "$new_generation"
+      profile_updated=1
     fi
 
-    exec '{{ common_home_manager_profile_path }}/activate' --driver-version 1
+    '{{ common_home_manager_profile_path }}/activate' --driver-version 1
+
+    if [[ "$profile_updated" -eq 1 ]]; then
+      printf '__home_manager_profile_updated__\n'
+    fi
   args:
     executable: /bin/bash
   environment:
@@ -218,7 +225,8 @@
         + local_home
         + '/.nix-profile/bin'
       }}
-  changed_when: false
+  register: nix_activate_result
+  changed_when: "'__home_manager_profile_updated__' in nix_activate_result.stdout"
   when: common_enable_nix
   tags:
     - nix
