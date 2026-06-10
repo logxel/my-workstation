@@ -126,6 +126,10 @@ docker_daemon_config:
     max-file: "3"
     mode: "non-blocking"
     max-buffer-size: "4m"
+  builder:
+    gc:
+      enabled: true
+      defaultKeepStorage: 20GB
 docker_desktop_cleanup_approved: false
 vscode_file_manager_integration: auto
 nix_install_mode: single-user
