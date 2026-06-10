@@ -147,7 +147,8 @@ in
       };
       shellAliases = {
         # nix home manager new magic shortcut to apply it in one command after updating this configuration:
-        hms = "nix run .#homeConfigurations.$(whoami).activationPackage";
+        hms = "DOTFILES_USER=$(whoami) DOTFILES_HOME=$HOME nix --extra-experimental-features 'nix-command flakes' run --impure ./nix#homeConfigurations.x86_64-linux.activationPackage";
+        opencode = "~/.opencode/bin/opencode";
         ll = "ls -lah";
         copilot = "${lib.getExe pkgs.github-copilot-cli}";
         cargo-release = "CARGO_INCREMENTAL=0 RUSTFLAGS='-C target-cpu=native -C codegen-units=1' cargo build --release";
