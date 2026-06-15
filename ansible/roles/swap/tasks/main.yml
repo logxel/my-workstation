@@ -1,0 +1,139 @@
+---
+- name: Calculate swap file size from available RAM
+  when: common_enable_swap | default(false)
+  tags:
+    - swap
+  block:
+    - name: Derive swap ratio from total RAM
+      ansible.builtin.set_fact:
+        swap_ratio: >-
+          {{
+            2.0 if (ansible_facts['memtotal_mb'] < 8192)
+            else 1.5 if (ansible_facts['memtotal_mb'] < 16384)
+            else 0.75 if (ansible_facts['memtotal_mb'] < 32768)
+            else 0.5
+          }}
+
+    - name: Derive swap file size in MiB
+      ansible.builtin.set_fact:
+        swap_size_mb: >-
+          {{
+            [
+              ((ansible_facts['memtotal_mb'] | int) * (swap_ratio | float)) | int,
+              4096
+            ] | max
+          }}
+
+    - name: Clamp swap file size to maximum
+      ansible.builtin.set_fact:
+        swap_size_mb: "{{ [swap_size_mb | int, 32768] | min }}"
+
+    - name: Report planned swap file
+      ansible.builtin.debug:
+        msg: >-
+          RAM {{ ansible_facts['memtotal_mb'] | int // 1024 }} GiB →
+          swap ratio {{ swap_ratio }} → swap file {{ swap_size_mb }} MiB
+          at {{ swap_file_path }} (priority {{ swap_priority }})
+
+- name: Teardown swap when feature is disabled
+  when: not (common_enable_swap | default(false))
+  tags:
+    - swap
+  block:
+    - name: Check if swap file is active
+      ansible.builtin.shell:
+        cmd: set -o pipefail && swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}'
+      register: swap_teardown_active
+      changed_when: false
+      failed_when: false
+
+    - name: Deactivate swap file
+      ansible.builtin.command:
+        cmd: swapoff "{{ swap_file_path }}"
+      when: swap_teardown_active.rc == 0
+      changed_when: swap_teardown_active.rc == 0
+
+    - name: Remove swap file from fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^\\s*{{ swap_file_path | regex_escape }}\\s+"
+        state: absent
+
+    - name: Remove swap file
+      ansible.builtin.file:
+        path: "{{ swap_file_path }}"
+        state: absent
+
+    - name: Confirm teardown
+      ansible.builtin.debug:
+        msg: "Swap disabled — removed {{ swap_file_path }} and fstab entry"
+
+- name: Setup swap file when feature is enabled
+  when: common_enable_swap | default(false)
+  tags:
+    - swap
+  block:
+    - name: Stat the swap file
+      ansible.builtin.stat:
+        path: "{{ swap_file_path }}"
+      register: swap_file_stat
+
+    - name: Check current swap file size against desired
+      ansible.builtin.set_fact:
+        swap_file_size_mismatch: >-
+          {{
+            swap_file_stat.stat.exists
+            and (swap_file_stat.stat.size | int != swap_size_mb | int * 1024 * 1024)
+          }}
+
+    - name: Remove stale swap file if size changed
+      ansible.builtin.file:
+        path: "{{ swap_file_path }}"
+        state: absent
+      when: swap_file_size_mismatch
+
+    - name: Deactivate stale swap if still active
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}' &&
+          swapoff "{{ swap_file_path }}" || true
+      changed_when: false
+      when: swap_file_size_mismatch
+
+    - name: Create swap file
+      ansible.builtin.command:
+        cmd: fallocate -l "{{ swap_size_mb }}M" "{{ swap_file_path }}"
+        creates: "{{ swap_file_path }}"
+      when: not swap_file_stat.stat.exists or swap_file_size_mismatch
+
+    - name: Set secure permissions
+      ansible.builtin.file:
+        path: "{{ swap_file_path }}"
+        mode: "0600"
+
+    - name: Format as swap
+      ansible.builtin.command:
+        cmd: mkswap "{{ swap_file_path }}"
+      when: not swap_file_stat.stat.exists or swap_file_size_mismatch
+      changed_when: true
+
+    - name: Check if swap file is already active
+      ansible.builtin.shell:
+        cmd: set -o pipefail && swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}'
+      register: swap_active_check
+      changed_when: false
+      failed_when: false
+
+    - name: Activate swap file
+      ansible.builtin.command:
+        cmd: swapon -p "{{ swap_priority }}" "{{ swap_file_path }}"
+      when: swap_active_check.rc != 0
+      changed_when: swap_active_check.rc != 0
+
+    - name: Ensure fstab entry
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: "{{ swap_file_path }} none swap sw,pri={{ swap_priority }} 0 0"
+        regexp: "^\\s*{{ swap_file_path | regex_escape }}\\s+"
+        state: present

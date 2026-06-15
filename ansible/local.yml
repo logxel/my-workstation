@@ -121,6 +121,18 @@
       tags:
         - nix
 
+    - name: Manage swap file
+      ansible.builtin.include_role:
+        name: swap
+        apply:
+          tags:
+            - swap
+            - system
+      when: common_run_role_swap
+      tags:
+        - swap
+        - system
+
   post_tasks:
     - name: Notify user session restart requirement
       ansible.builtin.debug:

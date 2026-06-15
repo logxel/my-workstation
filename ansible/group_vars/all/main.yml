@@ -32,6 +32,7 @@ feature_flags_defaults:
   docker: enabled
   virt_manager: disabled
   nix: enabled
+  swap: enabled
   openvpn: auto
   file_manager_integration: auto
 clipboard_manager_package_candidates:
@@ -132,6 +133,8 @@ docker_daemon_config:
       defaultKeepStorage: 20GB
 docker_desktop_cleanup_approved: false
 vscode_file_manager_integration: auto
+swap_file_path: /swapfile
+swap_priority: 500
 nix_install_mode: single-user
 nix_home_manager_profile_name: my-workstation-home-manager
 nix_cleanup_generation_max_age_days: 30

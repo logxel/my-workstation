@@ -5,11 +5,16 @@
 
 feature_flags:
   virt_manager: enabled
+  # swap: disabled
   # openvpn: auto
 
 # Set to true only when you want the playbook to replace Docker Desktop with
 # Docker Engine, migrate ~/.docker/config.json, and remove Docker Desktop state.
 # docker_desktop_cleanup_approved: true
+
+# Optional swap overrides.
+# swap_file_path: /swapfile
+# swap_priority: 500
 
 # Optional virt-manager overrides.
 # virt_manager_packages:

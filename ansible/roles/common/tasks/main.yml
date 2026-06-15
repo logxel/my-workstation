@@ -120,6 +120,14 @@
             else 'disabled' if common_feature_flags.nix == false
             else common_feature_flags.nix
           }}
+        common_feature_mode_swap: >-
+          {{
+            'enabled' if 'swap' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.swap == true
+            else 'disabled' if common_feature_flags.swap == false
+            else common_feature_flags.swap
+          }}
         common_feature_mode_openvpn: >-
           {{
             'enabled' if 'openvpn' in common_only_features
@@ -181,6 +189,7 @@
           - common_feature_mode_thunderbird in ['enabled', 'disabled', 'auto']
           - common_feature_mode_docker in ['enabled', 'disabled', 'auto']
           - common_feature_mode_nix in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_swap in ['enabled', 'disabled', 'auto']
           - common_feature_mode_openvpn in ['enabled', 'disabled', 'auto']
           - common_feature_mode_git_credential_oauth in ['enabled', 'disabled', 'auto']
           - common_feature_mode_firefox in ['enabled', 'disabled', 'auto']
@@ -411,6 +420,7 @@
         common_enable_thunderbird: "{{ common_feature_mode_thunderbird != 'disabled' }}"
         common_enable_docker: "{{ common_feature_mode_docker != 'disabled' }}"
         common_enable_nix: "{{ common_feature_mode_nix != 'disabled' }}"
+        common_enable_swap: "{{ common_feature_mode_swap != 'disabled' }}"
         common_enable_openvpn: >-
           {{
             common_feature_mode_openvpn == 'enabled'
@@ -514,6 +524,11 @@
           {{
             (not common_selective_feature_run)
             or 'nix' in common_only_features
+          }}
+        common_run_role_swap: >-
+          {{
+            (not common_selective_feature_run)
+            or 'swap' in common_only_features
           }}
         common_apt_desktop_packages: >-
           {{
