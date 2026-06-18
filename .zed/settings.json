@@ -1,0 +1,9 @@
+// Zed project settings
+// YAML indentation: the project uses 2 spaces throughout.
+{
+  "languages": {
+    "YAML": {
+      "tab_size": 2
+    }
+  }
+}

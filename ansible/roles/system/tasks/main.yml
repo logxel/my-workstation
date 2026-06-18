@@ -242,6 +242,30 @@
     - system
     - git
 
+- name: Restart gnome-keyring-daemon to ensure clean D-Bus secret service session
+  ansible.builtin.shell:
+    cmd: >-
+      gnome-keyring-daemon -r -d
+    executable: /bin/bash
+  register: system_keyring_restart
+  changed_when: system_keyring_restart.stdout | length > 0
+  failed_when: false
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - common_enable_git_credential_oauth
+    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
+    - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
+    - common_enable_secret_service
+  environment:
+    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+  tags:
+    - packages
+    - system
+    - git
+
 - name: Configure Git Credential Manager as the global Git credential helper
   ansible.builtin.blockinfile:
     path: "{{ local_home }}/.gitconfig"
