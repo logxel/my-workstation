@@ -544,7 +544,10 @@
             common_feature_mode_clip_win == 'enabled'
             or (
               common_feature_mode_clip_win == 'auto'
-              and common_clipboard_manager_missing
+              and (
+                common_clipboard_manager_missing
+                or 'clip-win' in ansible_facts.packages
+              )
             )
           }}
         common_install_copyq: >-
