@@ -40,100 +40,158 @@
   tags:
     - swap
   block:
-    - name: Check if swap file is active
-      ansible.builtin.shell:
-        cmd: set -o pipefail && swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}'
+    - name: Derive alternate swap file path
+      ansible.builtin.set_fact:
+        swap_path_alt: >-
+          {{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}
+
+    - name: Get list of active swaps
+      ansible.builtin.command: cat /proc/swaps
       register: swap_teardown_active
       changed_when: false
       failed_when: false
 
-    - name: Deactivate swap file
+    - name: Deactivate all swap files
       ansible.builtin.command:
-        cmd: swapoff "{{ swap_file_path }}"
-      when: swap_teardown_active.rc == 0
-      changed_when: swap_teardown_active.rc == 0
+        cmd: swapoff "{{ item }}"
+      loop:
+        - "{{ swap_file_path }}"
+        - "{{ swap_path_alt }}"
+      when: item in swap_teardown_active.stdout
+      changed_when: true
 
-    - name: Remove swap file from fstab
-      ansible.builtin.lineinfile:
-        path: /etc/fstab
-        regexp: "^\\s*{{ swap_file_path | regex_escape }}\\s+"
-        state: absent
-
-    - name: Remove swap file
+    - name: Remove swap files
       ansible.builtin.file:
-        path: "{{ swap_file_path }}"
+        path: "{{ item }}"
         state: absent
+      loop:
+        - "{{ swap_file_path }}"
+        - "{{ swap_path_alt }}"
+
+    - name: Comment out all swap entries in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: "^([^#].*\\s+swap\\s+.*)$"
+        replace: "# \\1"
 
     - name: Confirm teardown
       ansible.builtin.debug:
-        msg: "Swap disabled — removed {{ swap_file_path }} and fstab entry"
+        msg: "Swap disabled — removed swap files and fstab entries"
 
 - name: Setup swap file when feature is enabled
   when: common_enable_swap | default(false)
   tags:
     - swap
   block:
-    - name: Stat the swap file
-      ansible.builtin.stat:
-        path: "{{ swap_file_path }}"
-      register: swap_file_stat
-
-    - name: Check current swap file size against desired
+    - name: Derive alternate swap file path
       ansible.builtin.set_fact:
-        swap_file_size_mismatch: >-
+        swap_path_alt: >-
+          {{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}
+
+    - name: Get list of active swaps
+      ansible.builtin.command: cat /proc/swaps
+      register: swap_active_list
+      changed_when: false
+
+    - name: Stat known swap file paths
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: swap_paths_stat
+      loop:
+        - "{{ swap_file_path }}"
+        - "{{ swap_path_alt }}"
+
+    - name: Determine current active swap and its size
+      ansible.builtin.set_fact:
+        swap_current: >-
           {{
-            swap_file_stat.stat.exists
-            and (swap_file_stat.stat.size | int != swap_size_mb | int * 1024 * 1024)
+            swap_file_path if (swap_paths_stat.results[0].stat.exists
+              and swap_file_path in swap_active_list.stdout)
+            else swap_path_alt if (swap_paths_stat.results[1].stat.exists
+              and swap_path_alt in swap_active_list.stdout)
+            else None
+          }}
+        swap_current_size: >-
+          {{
+            swap_paths_stat.results[0].stat.size if (swap_paths_stat.results[0].stat.exists
+              and swap_file_path in swap_active_list.stdout)
+            else swap_paths_stat.results[1].stat.size if (swap_paths_stat.results[1].stat.exists
+              and swap_path_alt in swap_active_list.stdout)
+            else 0
           }}
 
-    - name: Remove stale swap file if size changed
-      ansible.builtin.file:
-        path: "{{ swap_file_path }}"
-        state: absent
-      when: swap_file_size_mismatch
+    - name: Determine next swap path for rotation
+      ansible.builtin.set_fact:
+        swap_next: "{{ swap_path_alt if swap_current == swap_file_path else swap_file_path }}"
 
-    - name: Deactivate stale swap if still active
-      ansible.builtin.shell:
-        cmd: >-
-          set -o pipefail &&
-          swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}' &&
-          swapoff "{{ swap_file_path }}" || true
-      changed_when: false
-      when: swap_file_size_mismatch
+    - name: Check if current swap needs migration
+      ansible.builtin.set_fact:
+        swap_needs_migration: >-
+          {{
+            swap_current == None
+            or ((swap_current_size | int - swap_size_mb | int * 1024 * 1024) | abs >= 1048576)
+          }}
 
-    - name: Create swap file
-      ansible.builtin.command:
-        cmd: fallocate -l "{{ swap_size_mb }}M" "{{ swap_file_path }}"
-        creates: "{{ swap_file_path }}"
-      when: not swap_file_stat.stat.exists or swap_file_size_mismatch
+    - name: Report swap state
+      ansible.builtin.debug:
+        msg:
+          - "Active: {{ swap_current | default('none') }} ({{ swap_current_size }} bytes)"
+          - "Desired: {{ swap_size_mb }} MiB ({{ swap_size_mb | int * 1024 * 1024 }} bytes)"
+          - "Next: {{ swap_next }}"
+          - "Migration needed: {{ swap_needs_migration }}"
 
-    - name: Set secure permissions
-      ansible.builtin.file:
-        path: "{{ swap_file_path }}"
-        mode: "0600"
+    - name: Migrate swap with zero-downtime rotation
+      when: swap_needs_migration
+      block:
+        - name: Remove stale file at alternate path
+          ansible.builtin.file:
+            path: "{{ swap_next }}"
+            state: absent
+          when: swap_paths_stat.results[0 if swap_next == swap_file_path else 1].stat.exists
 
-    - name: Format as swap
-      ansible.builtin.command:
-        cmd: mkswap "{{ swap_file_path }}"
-      when: not swap_file_stat.stat.exists or swap_file_size_mismatch
-      changed_when: true
+        - name: Create new swap file
+          ansible.builtin.command:
+            cmd: fallocate -l "{{ swap_size_mb }}M" "{{ swap_next }}"
+          changed_when: true
 
-    - name: Check if swap file is already active
-      ansible.builtin.shell:
-        cmd: set -o pipefail && swapon --show=NAME --noheadings 2>/dev/null | grep -qxF '{{ swap_file_path }}'
-      register: swap_active_check
-      changed_when: false
-      failed_when: false
+        - name: Set secure permissions
+          ansible.builtin.file:
+            path: "{{ swap_next }}"
+            mode: "0600"
 
-    - name: Activate swap file
-      ansible.builtin.command:
-        cmd: swapon -p "{{ swap_priority }}" "{{ swap_file_path }}"
-      when: swap_active_check.rc != 0
-      changed_when: swap_active_check.rc != 0
+        - name: Format as swap
+          ansible.builtin.command: mkswap "{{ swap_next }}"
+          changed_when: true
 
-    - name: Ensure fstab entry
+        - name: Activate new swap (old stays active)
+          ansible.builtin.command: swapon -p "{{ swap_priority }}" "{{ swap_next }}"
+          changed_when: true
+
+        - name: Deactivate old swap
+          ansible.builtin.command: swapoff "{{ swap_current }}"
+          when: swap_current != None
+          failed_when: false
+          changed_when: true
+
+        - name: Remove old swap file
+          ansible.builtin.file:
+            path: "{{ swap_current }}"
+            state: absent
+          when: swap_current != None
+
+        - name: Update current swap reference
+          ansible.builtin.set_fact:
+            swap_current: "{{ swap_next }}"
+
+    - name: Comment out all swap entries in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: "^([^#].*\\s+swap\\s+.*)$"
+        replace: "# \\1"
+
+    - name: Ensure correct swap entry in fstab
       ansible.builtin.lineinfile:
         path: /etc/fstab
-        line: "{{ swap_file_path }} none swap sw,pri={{ swap_priority }} 0 0"
-        regexp: "^\\s*{{ swap_file_path | regex_escape }}\\s+"
+        regexp: "^{{ swap_current | regex_escape }}\\s+"
+        line: "{{ swap_current }} none swap sw,pri={{ swap_priority }} 0 0"
         state: present
