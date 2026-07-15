@@ -128,6 +128,43 @@
   failed_when: false
   changed_when: ai_tools_gem_team.rc == 0
 
+- name: Ensure user-level OpenCode agents directory exists
+  ansible.builtin.file:
+    path: "{{ local_home }}/.opencode/agents"
+    state: directory
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - ai_tools_apm_available.stat.exists | default(false)
+    - ai_tools_opencode_post.stat.exists | default(false)
+
+- name: Find gem-team agent files deployed by APM
+  ansible.builtin.find:
+    paths: "{{ dotfiles_repo }}/.opencode/agents"
+    patterns: "gem-*.md"
+    file_type: file
+  register: ai_tools_gem_agents
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - ai_tools_apm_available.stat.exists | default(false)
+    - ai_tools_opencode_post.stat.exists | default(false)
+
+- name: Deploy gem-team agents to user-level ~/.opencode/agents
+  ansible.builtin.file:
+    src: "{{ item.path }}"
+    dest: "{{ local_home }}/.opencode/agents/{{ item.path | basename }}"
+    state: link
+    force: true
+  loop: "{{ ai_tools_gem_agents.files | default([]) }}"
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - ai_tools_apm_available.stat.exists | default(false)
+    - ai_tools_opencode_post.stat.exists | default(false)
+    - ai_tools_gem_agents.files | default([]) | length > 0
+
 - name: Verify APM installation
   ansible.builtin.shell:
     cmd: "{{ local_home }}/.local/bin/apm --version"
