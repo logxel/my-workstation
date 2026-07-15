@@ -133,6 +133,32 @@
         - swap
         - system
 
+    - name: Install rustup toolchain manager
+      ansible.builtin.include_role:
+        name: rustup
+        apply:
+          tags:
+            - rustup
+            - rust
+      when: common_run_role_rustup
+      tags:
+        - rustup
+        - rust
+
+    - name: Install AI tools (OpenCode, APM, gem-team)
+      ansible.builtin.include_role:
+        name: ai_tools
+        apply:
+          tags:
+            - ai-tools
+            - opencode
+            - apm
+      when: common_run_role_ai_tools
+      tags:
+        - ai-tools
+        - opencode
+        - apm
+
   post_tasks:
     - name: Notify user session restart requirement
       ansible.builtin.debug:

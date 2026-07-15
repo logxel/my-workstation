@@ -34,6 +34,8 @@ feature_flags_defaults:
   nix: enabled
   swap: enabled
   openvpn: auto
+  rustup: enabled
+  ai_tools: enabled
   file_manager_integration: auto
 clipboard_manager_package_candidates:
   - clip-win

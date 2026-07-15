@@ -176,6 +176,22 @@
             else 'disabled' if common_feature_flags.file_manager_integration == false
             else common_feature_flags.file_manager_integration
           }}
+        common_feature_mode_rustup: >-
+          {{
+            'enabled' if 'rustup' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.rustup == true
+            else 'disabled' if common_feature_flags.rustup == false
+            else common_feature_flags.rustup
+          }}
+        common_feature_mode_ai_tools: >-
+          {{
+            'enabled' if 'ai_tools' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.ai_tools == true
+            else 'disabled' if common_feature_flags.ai_tools == false
+            else common_feature_flags.ai_tools
+          }}
 
     - name: Ensure feature flag modes are valid
       ansible.builtin.assert:
@@ -196,6 +212,8 @@
           - common_feature_mode_edge in ['enabled', 'disabled', 'auto']
           - common_feature_mode_virt_manager in ['enabled', 'disabled', 'auto']
           - common_feature_mode_file_manager_integration in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_rustup in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_ai_tools in ['enabled', 'disabled', 'auto']
         fail_msg: All feature_flags values must be enabled, disabled, or auto.
 
     - name: Ensure the file manager integration mode is valid
@@ -453,6 +471,8 @@
             ([] if common_selective_feature_run else distro_flatpak_apps.get(ansible_facts['distribution'], []))
             + ([ 'org.mozilla.Thunderbird' ] if common_feature_mode_thunderbird != 'disabled' else [])
           }}
+        common_enable_rustup: "{{ common_feature_mode_rustup != 'disabled' }}"
+        common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled' }}"
         common_enable_file_manager_integration: >-
           {{
             common_feature_mode_file_manager_integration == 'enabled'
@@ -529,6 +549,16 @@
           {{
             (not common_selective_feature_run)
             or 'swap' in common_only_features
+          }}
+        common_run_role_rustup: >-
+          {{
+            (not common_selective_feature_run)
+            or 'rustup' in common_only_features
+          }}
+        common_run_role_ai_tools: >-
+          {{
+            (not common_selective_feature_run)
+            or 'ai_tools' in common_only_features
           }}
         common_apt_desktop_packages: >-
           {{

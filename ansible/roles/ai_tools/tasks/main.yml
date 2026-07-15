@@ -1,0 +1,168 @@
+---
+- name: Check if APM is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/apm"
+  register: ai_tools_apm_bin
+  become: true
+  become_user: "{{ local_user }}"
+
+- name: Install APM via official installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail; curl -sSL https://aka.ms/apm-unix | sh
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.local/bin/apm"
+    warn: false
+  become: true
+  become_user: "{{ local_user }}"
+  register: ai_tools_apm_official
+  when: not ai_tools_apm_bin.stat.exists
+  changed_when: true
+
+- name: Check APM after official installer
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/apm"
+  register: ai_tools_apm_post_official
+  become: true
+  become_user: "{{ local_user }}"
+  when: not ai_tools_apm_bin.stat.exists
+
+- name: Install pipx (fallback prerequisite)
+  ansible.builtin.apt:
+    name: pipx
+    state: present
+    install_recommends: false
+  register: ai_tools_pipx_install
+  when:
+    - not ai_tools_apm_bin.stat.exists
+    - not ai_tools_apm_post_official.stat.exists | default(false)
+
+- name: Install APM via pipx fallback
+  ansible.builtin.shell:
+    cmd: pipx install apm-cli
+    executable: /bin/bash
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
+  when:
+    - not ai_tools_apm_bin.stat.exists
+    - not ai_tools_apm_post_official.stat.exists | default(false)
+  register: ai_tools_apm_pipx
+  changed_when: true
+
+- name: Fail if APM could not be installed
+  ansible.builtin.fail:
+    msg: >
+      APM could not be installed via the official installer or pipx.
+      Try manually: pipx install apm-cli
+  when:
+    - not ai_tools_apm_bin.stat.exists
+    - not ai_tools_apm_post_official.stat.exists | default(false)
+    - ai_tools_apm_pipx is defined
+    - ai_tools_apm_pipx.failed | default(false)
+
+- name: Check if OpenCode is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.opencode/bin/opencode"
+  register: ai_tools_opencode_bin
+  become: true
+  become_user: "{{ local_user }}"
+
+- name: Install OpenCode via official installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail; CI=true curl -fsSL https://opencode.ai/install | bash
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.opencode/bin/opencode"
+    warn: false
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    HOME: "{{ local_home }}"
+    USER: "{{ local_user }}"
+  when: not ai_tools_opencode_bin.stat.exists
+  changed_when: true
+
+- name: Check OpenCode after installer
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.opencode/bin/opencode"
+  register: ai_tools_opencode_post
+  become: true
+  become_user: "{{ local_user }}"
+  when: not ai_tools_opencode_bin.stat.exists
+
+- name: Fail if OpenCode could not be installed
+  ansible.builtin.fail:
+    msg: >
+      OpenCode was installed but not found at {{ local_home }}/.opencode/bin/opencode.
+      Try restarting your shell or adding ~/.opencode/bin to PATH.
+  when:
+    - not ai_tools_opencode_bin.stat.exists
+    - not ai_tools_opencode_post.stat.exists | default(false)
+
+- name: Check APM for gem-team dependency
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/apm"
+  register: ai_tools_apm_available
+  become: true
+  become_user: "{{ local_user }}"
+  when: ai_tools_opencode_post.stat.exists | default(true)
+
+- name: Install gem-team extension for OpenCode via APM
+  ansible.builtin.shell:
+    cmd: >-
+      {{ local_home }}/.local/bin/apm install mubaidr/gem-team --target opencode
+    executable: /bin/bash
+  args:
+    chdir: "{{ dotfiles_repo }}"
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    HOME: "{{ local_home }}"
+    PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
+  when:
+    - ai_tools_apm_available.stat.exists | default(false)
+    - ai_tools_opencode_post.stat.exists | default(false)
+  register: ai_tools_gem_team
+  failed_when: false
+  changed_when: ai_tools_gem_team.rc == 0
+
+- name: Verify APM installation
+  ansible.builtin.shell:
+    cmd: "{{ local_home }}/.local/bin/apm --version"
+    executable: /bin/bash
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
+  register: ai_tools_apm_version
+  changed_when: false
+  when: ai_tools_apm_available.stat.exists | default(false)
+
+- name: Verify OpenCode installation
+  ansible.builtin.shell:
+    cmd: "{{ local_home }}/.opencode/bin/opencode --version"
+    executable: /bin/bash
+  become: true
+  become_user: "{{ local_user }}"
+  register: ai_tools_opencode_version
+  changed_when: false
+  when: ai_tools_opencode_post.stat.exists | default(false)
+
+- name: Report AI tools installation status
+  ansible.builtin.debug:
+    msg: |
+      === AI Tools Installation Summary ===
+      APM:      {{ ai_tools_apm_version.stdout
+        if (ai_tools_apm_version.stdout is defined and ai_tools_apm_version.rc == 0)
+        else 'NOT INSTALLED' }}
+      OpenCode: {{ ai_tools_opencode_version.stdout
+        if (ai_tools_opencode_version.stdout is defined and ai_tools_opencode_version.rc == 0)
+        else 'NOT INSTALLED' }}
+      gem-team: {{ 'Installed'
+        if (ai_tools_gem_team.rc is defined and ai_tools_gem_team.rc == 0)
+        else 'Check apm.yml' }}
+
+      If any commands are missing from PATH after installation, run:
+        source ~/.zshrc   (or restart your terminal)

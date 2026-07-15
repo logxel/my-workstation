@@ -1,0 +1,43 @@
+---
+- name: Remove conflicting Rust APT packages
+  ansible.builtin.apt:
+    name:
+      - rustc
+      - cargo
+      - libstd-rust-1.75
+      - libstd-rust-dev
+    state: absent
+    purge: true
+    autoremove: true
+
+- name: Remove stale ~/.cargo leftover (rustup-managed Rust uses CARGO_HOME)
+  ansible.builtin.file:
+    path: "{{ local_home }}/.cargo"
+    state: absent
+  become: true
+  become_user: "{{ local_user }}"
+
+- name: Determine if rustup is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.rustup"
+  register: rustup_rustup_dir
+  become: true
+  become_user: "{{ local_user }}"
+
+- name: Install rustup toolchain manager
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
+      | sh -s -- -y --no-modify-path
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.rustup"
+    warn: false
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    CARGO_HOME: "{{ local_home }}/.local/share/cargo"
+    RUSTUP_HOME: "{{ local_home }}/.rustup"
+  when: not rustup_rustup_dir.stat.exists
+  changed_when: true

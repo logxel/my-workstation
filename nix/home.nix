@@ -190,14 +190,20 @@ in
     VISUAL = editorCommand;
     BUN_INSTALL = "${homeDirectory}/.bun";
     CARGO_HOME = "${homeDirectory}/.local/share/cargo";
+    RUSTUP_HOME = "${homeDirectory}/.rustup";
     CARGO_TARGET_DIR = "${homeDirectory}/.cache/cargo-target";
     GOCACHE = "${homeDirectory}/.cache/go-build";
     GOMODCACHE = "${homeDirectory}/.cache/go/pkg/mod";
     GOPATH = "${homeDirectory}/.local/share/go";
   };
 
+  # NOTE: After adding new paths here, run `hms` then log out and back in
+  # (or reboot). Home Manager's hm-session-vars.sh exports a guard
+  # (__HM_SESS_VARS_SOURCED) that prevents updates from taking effect in
+  # existing sessions. A fresh login is the official procedure.
   home.sessionPath = [
     "${homeDirectory}/.bun/bin"
+    "${homeDirectory}/.local/share/cargo/bin"
     "${homeDirectory}/.local/bin"
   ];
 
@@ -229,6 +235,7 @@ in
       "$HOME/.cache/go/pkg/mod" \
       "$HOME/.local/share/cargo" \
       "$HOME/.local/share/go" \
+      "$HOME/.rustup" \
       "$HOME/.local/bin"
   '';
 
