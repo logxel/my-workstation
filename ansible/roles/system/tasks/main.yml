@@ -67,7 +67,6 @@
         apt_base_packages
         + common_apt_desktop_packages
         + common_secret_service_packages
-        + ([ 'acl', 'wl-clipboard', 'xclip' ] if common_install_clip_win else [])
         + ([ 'copyq', 'copyq-plugins' ] if common_install_copyq else [])
         + ([ 'libreoffice' ] if common_install_libreoffice else [])
         + ([ 'firefox' ] if common_enable_firefox else [])
@@ -95,7 +94,6 @@
       {{
         common_apt_desktop_packages
         + common_secret_service_packages
-        + ([ 'acl', 'wl-clipboard', 'xclip' ] if common_install_clip_win else [])
         + ([ 'copyq', 'copyq-plugins' ] if common_install_copyq else [])
         + ([ 'libreoffice' ] if common_install_libreoffice else [])
         + ([ 'firefox' ] if common_enable_firefox else [])
@@ -117,7 +115,6 @@
     - >-
       common_apt_desktop_packages | length > 0
       or common_secret_service_packages | length > 0
-      or common_install_clip_win
       or common_install_copyq
       or common_install_libreoffice
       or common_enable_firefox
@@ -302,14 +299,14 @@
     - system
     - git
 
-- name: Report when Clip-Win auto mode defers to an existing clipboard manager
+- name: Report when clipboard-history auto mode defers to an existing clipboard manager
   ansible.builtin.debug:
     msg: >-
-      Skipping Clip-Win because the system already has a clipboard manager installed:
+      Skipping clipboard-history (Ringboard) because the system already has a clipboard manager installed:
       {{ common_installed_clipboard_managers | join(', ') }}.
   when:
-    - common_feature_mode_clip_win == 'auto'
-    - not common_install_clip_win
+    - common_feature_mode_clipboard_history == 'auto'
+    - not common_install_clipboard_history
   changed_when: false
   tags:
     - packages
@@ -337,12 +334,12 @@
     - shell
     - system
 
-# Clip-Win install and setup
-- name: Include Clip-Win setup tasks
-  ansible.builtin.import_tasks: clip_win.yml
-  when: common_install_clip_win
+# Clipboard-history (Ringboard) install and setup
+- name: Include clipboard-history setup tasks
+  ansible.builtin.import_tasks: clipboard_history.yml
+  when: common_install_clipboard_history
   tags:
-    - clip-win
+    - clipboard-history
 
 # Pop!_OS system monitor shortcut setup
 - name: Include GNOME System Monitor shortcut tasks

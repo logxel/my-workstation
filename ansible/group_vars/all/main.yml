@@ -20,7 +20,7 @@ nix_system_map:
 # Baseline defaults. Local overrides can define only the keys they need in override.yml.
 feature_flags_defaults:
   desktop_tools: auto
-  clip_win: auto
+  clipboard_history: auto
   copyq: disabled
   office_suite: auto
   vscode: enabled
@@ -39,6 +39,8 @@ feature_flags_defaults:
   file_manager_integration: auto
 clipboard_manager_package_candidates:
   - clip-win
+  - ringboard-server
+  - ringboard-iced
   - copyq
   - cliphist
   - clipman
@@ -105,8 +107,8 @@ distro_flatpak_apps:
     - com.valvesoftware.Steam
     - org.videolan.VLC
 rustdesk_version: "1.4.6"
-# Set to a pinned version or "latest" to resolve release URL and SHA-256 from GitHub metadata.
-clip_win_version: "latest"
+# Branch/tag of axellpadilla/clipboard-history to install from.
+clipboard_history_branch: "patched"
 rustdesk_release_arch_map:
   amd64: x86_64
   arm64: aarch64

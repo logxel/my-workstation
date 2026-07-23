@@ -56,13 +56,13 @@
             else 'disabled' if common_feature_flags.desktop_tools == false
             else common_feature_flags.desktop_tools
           }}
-        common_feature_mode_clip_win: >-
+        common_feature_mode_clipboard_history: >-
           {{
-            'enabled' if 'clip_win' in common_only_features
+            'enabled' if 'clipboard_history' in common_only_features
             else 'disabled' if common_only_features | length > 0
-            else 'enabled' if common_feature_flags.clip_win == true
-            else 'disabled' if common_feature_flags.clip_win == false
-            else common_feature_flags.clip_win
+            else 'enabled' if common_feature_flags.clipboard_history == true
+            else 'disabled' if common_feature_flags.clipboard_history == false
+            else common_feature_flags.clipboard_history
           }}
         common_feature_mode_copyq: >-
           {{
@@ -197,7 +197,7 @@
       ansible.builtin.assert:
         that:
           - common_feature_mode_desktop_tools in ['enabled', 'disabled', 'auto']
-          - common_feature_mode_clip_win in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_clipboard_history in ['enabled', 'disabled', 'auto']
           - common_feature_mode_copyq in ['enabled', 'disabled', 'auto']
           - common_feature_mode_office_suite in ['enabled', 'disabled', 'auto']
           - common_feature_mode_vscode in ['enabled', 'disabled', 'auto']
@@ -296,69 +296,6 @@
             | trim
           }}
         common_is_pop_desktop_host: "{{ ansible_facts['distribution'] == 'Pop!_OS' }}"
-
-    - name: Fetch Clip-Win release metadata
-      ansible.builtin.uri:
-        url: >-
-          {{
-            'https://api.github.com/repos/techlogycs/clip-win/releases/latest'
-            if clip_win_version == 'latest'
-            else 'https://api.github.com/repos/techlogycs/clip-win/releases/tags/v'
-              ~ (clip_win_version | regex_replace('^v', ''))
-          }}
-        method: GET
-        return_content: true
-        status_code: 200
-      register: common_clip_win_release_api_response
-
-    - name: Resolve Clip-Win release version
-      ansible.builtin.set_fact:
-        common_clip_win_resolved_version: >-
-          {{
-            (
-              common_clip_win_release_api_response.json.tag_name
-              | default('')
-              | regex_replace('^v', '')
-            )
-            if clip_win_version == 'latest'
-            else (clip_win_version | regex_replace('^v', ''))
-          }}
-
-    - name: Ensure Clip-Win release version is resolved
-      ansible.builtin.assert:
-        that:
-          - common_clip_win_resolved_version | length > 0
-        fail_msg: Could not resolve a valid Clip-Win release version.
-
-    - name: Derive Clip-Win package filename
-      ansible.builtin.set_fact:
-        common_clip_win_package_filename: >-
-          clip-win_{{ common_clip_win_resolved_version }}_{{ common_deb_arch }}.deb
-
-    - name: Derive Clip-Win release facts
-      ansible.builtin.set_fact:
-        common_clip_win_deb_checksum: >-
-          {{
-            (
-              common_clip_win_release_api_response.json.assets
-              | default([])
-              | selectattr('name', 'equalto', common_clip_win_package_filename)
-              | map(attribute='digest')
-              | first
-            )
-            | default('')
-          }}
-        common_clip_win_deb_url: >-
-          {{
-            (
-              common_clip_win_release_api_response.json.assets
-              | default([])
-              | selectattr('name', 'equalto', common_clip_win_package_filename)
-              | map(attribute='browser_download_url')
-              | first
-            )
-            | default('')
-          }}
 
     - name: Fetch Git Credential Manager release metadata
       ansible.builtin.uri:
@@ -498,7 +435,7 @@
               | intersect([
                 'vscode',
                 'desktop_tools',
-                'clip_win',
+                'clipboard_history',
                 'copyq',
                 'office_suite',
                 'thunderbird',
@@ -569,13 +506,15 @@
             )
             else []
           }}
-        common_install_clip_win: >-
+        common_install_clipboard_history: >-
           {{
-            common_feature_mode_clip_win == 'enabled'
+            common_feature_mode_clipboard_history == 'enabled'
             or (
-              common_feature_mode_clip_win == 'auto'
+              common_feature_mode_clipboard_history == 'auto'
               and (
                 common_clipboard_manager_missing
+                or 'ringboard-server' in ansible_facts.packages
+                or 'ringboard-iced' in ansible_facts.packages
                 or 'clip-win' in ansible_facts.packages
               )
             )
@@ -590,9 +529,9 @@
               )
             )
             and not (
-              common_feature_mode_clip_win == 'enabled'
+              common_feature_mode_clipboard_history == 'enabled'
               or (
-                common_feature_mode_clip_win == 'auto'
+                common_feature_mode_clipboard_history == 'auto'
                 and common_clipboard_manager_missing
               )
             )
@@ -651,10 +590,10 @@
             and (vscode_file_manager_integration == 'desktop-entry'
               or (vscode_file_manager_integration == 'auto' and 'nautilus' not in ansible_facts.packages))
           }}
-        common_clip_win_is_gnome_family: >-
+        common_clipboard_history_is_gnome_family: >-
           {{
             'gnome' in common_current_desktop
             or 'unity' in common_current_desktop
             or 'pop' in common_current_desktop
           }}
-        common_clip_win_is_cosmic: "{{ 'cosmic' in common_current_desktop }}"
+        common_clipboard_history_is_cosmic: "{{ 'cosmic' in common_current_desktop }}"
