@@ -41,6 +41,7 @@ clipboard_manager_package_candidates:
   - clip-win
   - ringboard-server
   - ringboard-iced
+  - ringboard
   - copyq
   - cliphist
   - clipman
