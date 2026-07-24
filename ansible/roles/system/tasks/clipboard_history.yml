@@ -65,22 +65,7 @@
   tags:
     - clipboard-history
 
-- name: Check whether Ringboard is already installed
-  ansible.builtin.stat:
-    path: "{{ local_home }}/.cargo/bin/ringboard-iced"
-  register: system_ringboard_installed_check
-  become: false
-  tags:
-    - clipboard-history
-
-- name: Set Ringboard installed fact
-  ansible.builtin.set_fact:
-    system_ringboard_is_installed: "{{ system_ringboard_installed_check.stat.exists }}"
-  tags:
-    - clipboard-history
-
 - name: Install Ringboard with Iced GUI via official install script
-  when: system_ringboard_is_installed is not defined or not system_ringboard_is_installed
   tags:
     - clipboard-history
   block:
