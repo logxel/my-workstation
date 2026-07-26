@@ -95,19 +95,80 @@
   tags:
     - nix-teardown
 
-- name: Check whether .zshrc still points into the Nix store
+- name: Check whether Home Manager's own CLI is symlinked into the default Nix profile
   ansible.builtin.stat:
-    path: "{{ local_home }}/.zshrc"
+    path: "{{ common_nix_default_profile_path }}/bin/home-manager"
   become: false
-  register: nix_teardown_zshrc_stat
+  register: nix_teardown_default_profile_hm_marker
   tags:
     - nix-teardown
 
-- name: Check whether .zshenv still points into the Nix store
-  ansible.builtin.stat:
-    path: "{{ local_home }}/.zshenv"
+- name: Delete the default Nix profile when Home Manager activated into it
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
   become: false
-  register: nix_teardown_zshenv_stat
+  loop:
+    - "{{ common_nix_default_profile_path }}"
+    - "{{ common_nix_profile_symlink_path }}"
+  when:
+    - nix_teardown_default_profile_hm_marker.stat.exists
+  tags:
+    - nix-teardown
+
+- name: Report when the default Nix profile was left alone
+  ansible.builtin.debug:
+    msg: >-
+      {{ common_nix_profile_symlink_path }} has no bin/home-manager marker, so it
+      does not look Home-Manager-owned and teardown left it in place. Inspect
+      {{ common_nix_default_profile_path }}/manifest.nix by hand if Warp/bun/uv/etc.
+      are still resolving from the Nix store afterward.
+  when:
+    - not nix_teardown_default_profile_hm_marker.stat.exists
+  changed_when: false
+  tags:
+    - nix-teardown
+
+- name: Stat the dotfiles Home Manager's activation may have displaced, and their backups
+  ansible.builtin.stat:
+    path: "{{ local_home }}/{{ item }}"
+  become: false
+  loop:
+    - .zshrc
+    - .zshenv
+    - .zshrc.home-manager-backup
+    - .zshenv.home-manager-backup
+  loop_control:
+    label: "{{ item }}"
+  register: nix_teardown_dotfile_stats
+  tags:
+    - nix-teardown
+
+- name: Derive restore/remove/report actions for the displaced dotfiles
+  ansible.builtin.set_fact:
+    nix_teardown_dotfile_plan: >-
+      {{
+        nix_teardown_dotfile_plan | default([]) + [{
+          'file': item,
+          'is_hm_symlink': (
+            file_stat.stat.exists
+            and (file_stat.stat.islnk | default(false))
+            and (file_stat.stat.lnk_source is defined)
+            and ('/nix/store/' in file_stat.stat.lnk_source)
+          ),
+          'has_backup': backup_stat.stat.exists,
+        }]
+      }}
+  loop: "{{ ['.zshrc', '.zshenv'] }}"
+  loop_control:
+    label: "{{ item }}"
+  vars:
+    file_stat: "{{ nix_teardown_dotfile_stats.results | selectattr('item', 'equalto', item) | first }}"
+    backup_stat: >-
+      {{
+        nix_teardown_dotfile_stats.results
+        | selectattr('item', 'equalto', item ~ '.home-manager-backup') | first
+      }}
   tags:
     - nix-teardown
 
@@ -115,21 +176,45 @@
   ansible.builtin.command:
     cmd: mv -v "{{ local_home }}/{{ item.file }}.home-manager-backup" "{{ local_home }}/{{ item.file }}"
   become: false
-  loop:
-    - file: .zshrc
-      stat: "{{ nix_teardown_zshrc_stat }}"
-    - file: .zshenv
-      stat: "{{ nix_teardown_zshenv_stat }}"
+  loop: "{{ nix_teardown_dotfile_plan }}"
   loop_control:
     label: "{{ item.file }}"
   register: nix_teardown_restore_dotfiles
   changed_when: nix_teardown_restore_dotfiles.rc == 0
-  failed_when: false
+  ignore_errors: true # noqa: ignore-errors
   when:
-    - item.stat.stat.exists
-    - item.stat.stat.islnk | default(false)
-    - item.stat.stat.lnk_source is defined
-    - "'/nix/store/' in item.stat.stat.lnk_source"
+    - item.is_hm_symlink
+    - item.has_backup
+  tags:
+    - nix-teardown
+
+- name: Remove Home-Manager-owned dotfiles that have no backup to restore
+  ansible.builtin.file:
+    path: "{{ local_home }}/{{ item.file }}"
+    state: absent
+  become: false
+  loop: "{{ nix_teardown_dotfile_plan }}"
+  loop_control:
+    label: "{{ item.file }}"
+  when:
+    - item.is_hm_symlink
+    - not item.has_backup
+  tags:
+    - nix-teardown
+
+- name: Report dotfiles removed without a backup to restore
+  ansible.builtin.debug:
+    msg: >-
+      {{ local_home }}/{{ item.file }} pointed into the Nix store with no
+      *.home-manager-backup to restore, so it was deleted outright. Re-run the
+      normal playbook (shell_config role) to regenerate it if it's expected to exist.
+  loop: "{{ nix_teardown_dotfile_plan }}"
+  loop_control:
+    label: "{{ item.file }}"
+  when:
+    - item.is_hm_symlink
+    - not item.has_backup
+  changed_when: false
   tags:
     - nix-teardown
 
