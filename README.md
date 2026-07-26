@@ -2,8 +2,8 @@
 
 Este repositorio aprovisiona una estación de trabajo Pop!_OS o Ubuntu con una estrategia en dos capas:
 
-- Ansible gestiona la capa base del sistema operativo: repositorios APT, paquetes del sistema, Docker, Flatpak guiado por facts, integración con el gestor de archivos y bootstrap de Nix.
-- Nix con Home Manager gestiona el entorno de usuario de forma reproducible: Zsh, utilidades de desarrollo y variables de entorno declarativas.
+- Ansible gestiona tanto la capa base del sistema operativo (repositorios APT, paquetes del sistema, Docker, Flatpak guiado por facts, integración con el gestor de archivos) como el entorno de usuario (Zsh, Oh My Zsh, herramientas de desarrollo, variables de entorno y el timer de limpieza periódica).
+- Nix se mantiene instalado únicamente para `nix shell` / `nix develop` y la integración con `direnv`; ya no gestiona paquetes de usuario ni dotfiles (ver «Migración desde Home Manager» más abajo).
 - El DevContainer permite validar, lintar y evolucionar la configuración sin contaminar el host.
 
 ## Estructura
@@ -32,9 +32,10 @@ dotfiles/
 │       ├── flatpak/
 │       ├── docker/
 │       ├── file_manager/
-│       └── nix/
+│       ├── nix/
+│       ├── dev_tools/
+│       └── shell_config/
 ├── nix/
-│   ├── home.nix
 │   └── flake.nix
 ├── bootstrap.sh
 └── README.md
@@ -44,8 +45,9 @@ dotfiles/
 
 1. En el host Pop!_OS o Ubuntu real, ejecuta `./bootstrap.sh`.
 2. El script instala `git`, `curl` y `ansible` solo si faltan, clona el repositorio en `~/my-workstation` desde `https://github.com/techlogycs/my-workstation.git` por defecto si hace falta y lanza el playbook local.
-3. El playbook configura APT y, según los flags de `ansible/group_vars/all/main.yml`, instala VS Code, Brave, Docker, virt-manager con libvirt, RustDesk nativo, Flatpak en Ubuntu y Pop!_OS, integración con el gestor de archivos y Nix.
-4. Finalmente, Ansible construye y activa Home Manager desde el flake fijado en `nix/`.
+3. El playbook configura APT y, según los flags de `ansible/group_vars/all/main.yml`, instala VS Code, Brave, Docker, virt-manager con libvirt, RustDesk nativo, Warp Terminal, Flatpak en Ubuntu y Pop!_OS, integración con el gestor de archivos y el binario de Nix (solo para `nix shell`/`nix develop`).
+4. El rol `dev_tools` instala bun, uv, dust y Node.js (vía NodeSource); el rol `rustup` provee el toolchain de Rust necesario para compilar dust.
+5. Finalmente, el rol `shell_config` instala Oh My Zsh, plantea `~/.zshrc` (aliases, integración con Nix/direnv, autosuggestions/syntax-highlighting), despliega los wrappers de Bun (`npm`/`npx`/`yarn`/`pnpm`) y activa el timer `workstation-auto-clean`.
 
 ## Roles y tags
 
@@ -59,10 +61,13 @@ El playbook usa roles pequeños y etiquetados para que puedas ejecutar solo una 
 - `flatpak`: Flathub y aplicaciones Flatpak por distro.
 - `docker`: configuración de `daemon.json` y servicio.
 - `file_manager`: integración “Open in Code”.
-- `nix`: instalación de Nix y activación de Home Manager.
+- `nix`: instalación del binario de Nix (solo para `nix shell`/`nix develop`, sin Home Manager).
+- `dev_tools`: instala bun, uv, dust (vía cargo) y Node.js (vía NodeSource).
+- `shell_config`: Oh My Zsh, plantilla de `~/.zshrc`, wrappers de Bun y timer `workstation-auto-clean`.
 - `apt-clean`: elimina definiciones legacy de repositorios APT gestionados por el repo, purga paquetes huérfanos y limpia la caché local de APT.
-- `nix-clean`: limpieza de generaciones antiguas del perfil gestionado de Nix/Home Manager y garbage collection del store.
+- `nix-clean`: garbage collection genérico del store de Nix (`make nix-clean`).
 - `nix-migrate-single-user`: desinstala una instalación multiusuario existente de Nix y reprovisiona Nix en modo `single-user`.
+- `nix-teardown`: desinstala una activación previa de Home Manager en hosts que migraron desde la versión anterior de este repo (ver «Migración desde Home Manager»).
 
 Ejemplos:
 
@@ -73,10 +78,12 @@ ansible-playbook ansible/local.yml --tags nix,file-manager
 ansible-playbook ansible/apt-clean.yml
 ansible-playbook ansible/nix-clean.yml
 ansible-playbook ansible/nix-migrate-single-user.yml
+ansible-playbook ansible/nix-teardown.yml
 make install-feature features=thunderbird
 make apt-clean
 make nix-clean
 make nix-migrate-single-user
+make nix-teardown
 ./bootstrap.sh --only-feature thunderbird
 ./bootstrap.sh --tags system
 ```
@@ -86,10 +93,10 @@ make nix-migrate-single-user
 El contenedor existe únicamente para desarrollo y validación de la configuración. Incluye:
 
 - `ansible-lint` y `yamllint` para Ansible/YAML.
-- `nix`, `home-manager`, `statix` y `nixpkgs-fmt` para evaluar, lintar y formatear la configuración Nix.
+- `nix`, `statix` y `nixpkgs-fmt` para evaluar, lintar y formatear la configuración Nix (el `flake.nix` restante solo expone un `devShell` y checks de lint, ya sin Home Manager).
 - Extensiones de VS Code orientadas a Ansible, Nix y TOML.
 
-La imagen del DevContainer instala directamente `ansible-core`, `ansible-lint`, `yamllint` y Nix. Después, `postCreateCommand` solo añade `home-manager`, `statix` y `nixpkgs-fmt` al perfil del usuario y ejecuta `nix flake check --impure` sobre `nix/`.
+La imagen del DevContainer instala directamente `ansible-core`, `ansible-lint`, `yamllint` y Nix. Después, `postCreateCommand` solo añade `statix` y `nixpkgs-fmt` al perfil del usuario y ejecuta `nix flake check --impure` sobre `nix/`.
 
 Si ya tenías el DevContainer creado antes de estos cambios, reconstruye el contenedor para que las herramientas nuevas queden disponibles en `PATH`.
 
@@ -138,7 +145,7 @@ Los componentes opcionales están controlados desde `ansible/group_vars/all/main
 - Si el host tiene una sesión GNOME, Pop o COSMIC y habilitas VS Code o Git Credential Manager, el playbook instala `gnome-keyring` para que exista un proveedor Secret Service/libsecret y no aparezca el warning de keyring en VS Code.
 - El playbook elimina `git-credential-oauth` y mantiene el repositorio estable de git-core en Ubuntu y Pop!_OS para instalar una versión upstream reciente de Git, compatible con Git Credential Manager.
 - Los repositorios APT gestionados directamente por este repo para Microsoft, Docker y git-core usan keyrings dedicados bajo `/etc/apt/keyrings`, y el flujo `apt-clean` borra definiciones legacy conocidas para evitar entradas duplicadas o avisos por `trusted.gpg` en `apt`.
-- `apt_base_packages` incluye `ripgrep`, y el entorno de Home Manager añade `ripgrep` para que el comando `rg` exista tanto en la capa del sistema como en la del usuario.
+- `apt_base_packages` incluye `ripgrep` (antes también se instalaba por duplicado vía Home Manager; ahora `rg` viene solo de APT).
 - `distro_flatpak_apps` define las aplicaciones de escritorio vía Flatpak por distro, excluyendo RustDesk porque se instala de forma nativa.
 - `rustdesk_version` fija la versión de RustDesk que se descarga como paquete `.deb`.
 - `rustdesk_release_arch_map` traduce la arquitectura Debian detectada al sufijo usado por los artefactos oficiales de RustDesk.
@@ -203,21 +210,33 @@ Las herramientas de escritorio GNOME se comportan así:
 - Docker usa `json-file` con rotación, modo `non-blocking` y buffer acotado para evitar crecimiento descontrolado de logs y reducir bloqueos por I/O, preservando otras claves ya presentes en `daemon.json` como `data-root`. Los `log-opts` se escriben como strings porque `dockerd` lo exige en `daemon.json`.
 - Nix usa `nix_install_mode` para controlar cómo se instala en el host. El valor por defecto es `single-user`, que evita crear la batería de usuarios `nixbld*` en estaciones de trabajo donde no hace falta el daemon multiusuario. Si necesitas el modelo clásico con daemon y build users compartidos, cambia `nix_install_mode` a `multi-user`.
 - En modo `multi-user`, el repositorio sigue usando Determinate Systems para simplificar una instalación consistente en Ubuntu/Pop!_OS.
-- Home Manager se activa construyendo el paquete de activación desde el flake del sistema detectado, lo que evita depender de una arquitectura fija o de una instalación previa del ejecutable `home-manager` en el host.
-- La activación de Home Manager usa un perfil nombrado y estable en `~/.local/state/nix/profiles/my-workstation-home-manager`; Ansible actualiza ese perfil explícitamente y ejecuta el script `activate` con `--driver-version 1` para evitar que el propio activation script siga creando generaciones extra en el perfil legacy `home-manager`.
-- El playbook `ansible/nix-clean.yml` y el atajo `make nix-clean` podan generaciones antiguas del perfil nombrado actual y también de las rutas legacy conocidas de Home Manager, incluyendo `~/.local/state/nix/profiles/home-manager`, `~/.local/state/home-manager/profiles/home-manager` y `/nix/var/nix/profiles/per-user/$USER/home-manager` si aún existen; después ejecutan `nix-collect-garbage` para limpiar rutas no alcanzables del store sin depender de `nix-command`.
+- Desde que se retiró Home Manager, el rol `nix` solo instala el binario de Nix; no construye ni activa ningún perfil. `nix/flake.nix` únicamente expone `devShells` (nil, nixpkgs-fmt, statix) y los checks de lint — úsalo con `nix develop` para un shell de validación, no para gestionar paquetes de usuario.
+- El rol `shell_config` reemplaza lo que antes hacía Home Manager: instala Oh My Zsh (instalador oficial, modo `--unattended`), plantea `~/.zshrc` desde una plantilla Jinja2 (tema, plugins, autosuggestions/syntax-highlighting vía paquetes APT, alias, variables de sesión y el hook de `direnv`), y despliega los wrappers de Bun (`npm`, `npx`, `yarn`, `pnpm`) en `~/.local/bin`.
+- El rol `shell_config` también instala el timer de usuario `workstation-auto-clean` (plantillas `.service`/`.timer` en `~/.config/systemd/user/`), que limpia periódicamente `~/Downloads` y directorios de caché de herramientas (`~/.bun/install/cache`, `~/.cache/cargo-target`, `~/.cache/go-build`, `~/.cache/go/pkg/mod`), y ejecuta `uv cache prune`, `direnv prune` y `nix-collect-garbage --delete-older-than`.
+- `direnv` ahora se instala como paquete APT (antes lo aportaba Home Manager); el hook de Zsh vive en la plantilla de `shell_config`.
 - Si una máquina ya tiene Nix multiusuario y quieres eliminar los usuarios `nixbld*`, usa `ansible/nix-migrate-single-user.yml` o `make nix-migrate-single-user`. Ese flujo desinstala la instalación multiusuario existente con `/nix/nix-installer uninstall --no-confirm` cuando detecta Determinate, o aplica los pasos documentados por upstream para Linux con systemd cuando no hay receipt/uninstaller, y luego vuelve a aprovisionar Nix en modo `single-user`.
-- Home Manager también instala un timer de usuario que limpia periódicamente ficheros antiguos en `~/Downloads`, aplica limpieza por antigüedad solo a directorios explícitos de herramientas sin pruning nativo claro como `~/.bun/install/cache`, `~/.cache/cargo-target`, `~/.cache/go-build` y `~/.cache/go/pkg/mod`, y además ejecuta `uv cache prune`, `direnv prune` y `nix-collect-garbage --delete-older-than` para evitar barridos agresivos sobre todo `~/.cache`.
-- Home Manager también instala wrappers `npm` y `npx` en `~/.local/bin` para que Bun pueda actuar como sustituto por defecto de `npm` y `npx` en la shell del usuario.
-- GitHub Copilot CLI se instala de forma declarativa mediante `pkgs.github-copilot-cli`, evitando instalaciones de red durante la activación de Home Manager.
+- `ansible/nix-clean.yml` / `make nix-clean` ahora solo ejecuta `nix-collect-garbage` genérico — la poda de generaciones de Home Manager se retiró porque ya no se crean generaciones nuevas.
+- Warp Terminal se instala desde el repositorio APT oficial (`releases.warp.dev`), no desde Flatpak (no publican uno) ni desde Nix.
+
+## Migración desde Home Manager
+
+Si este host todavía tiene una activación de Home Manager de una versión anterior de este repo (perfil en `~/.local/state/nix/profiles/my-workstation-home-manager`, el timer `workstation-auto-clean` instalado por Nix, wrappers de `npm`/`npx`/`yarn`/`pnpm` enlazados al store, o un `~/.zshrc` simbólico hacia `/nix/store`), ejecuta la limpieza dedicada antes de volver a aplicar el playbook normal:
+
+```bash
+ansible-playbook ansible/nix-teardown.yml -K
+# o
+make nix-teardown
+```
+
+Esto: detiene y deshabilita el timer/servicio `workstation-auto-clean` heredado, elimina los wrappers de `~/.local/bin` que aún apunten al store, borra el perfil nombrado de Home Manager y las rutas legacy conocidas, restaura `.zshrc`/`.zshenv` desde su copia `.home-manager-backup` si Ansible la había creado, y finalmente ejecuta `nix-collect-garbage -d` para reclamar el espacio del store. Nix en sí **no** se desinstala — se mantiene para `nix shell`/`nix develop`. Después, vuelve a correr `make playbook` para que `dev_tools`, `desktop_apps` y `shell_config` aprovisionen lo que Home Manager gestionaba antes.
 
 ## Ajustes que probablemente querrás personalizar
 
 - `DOTFILES_REPO_URL` en `bootstrap.sh` si quieres clonar desde un fork o mirror distinto al repositorio oficial.
-- El tema de Oh My Zsh en `nix/home.nix`.
-- Los wrappers `npm` y `npx` en `nix/home.nix` si prefieres mantener los binarios de Node.js sin Bun como compat layer.
-- La política `cleanupPolicy` en `nix/home.nix` si quieres cambiar la frecuencia o la antigüedad máxima de `Downloads`, los directorios explícitos con limpieza por antigüedad, o la limpieza nativa de `uv`, `direnv` y Nix.
-- `nix_home_manager_profile_name` y `nix_cleanup_generation_max_age_days` en `ansible/group_vars/all/main.yml` si quieres renombrar el perfil estable de Home Manager o cambiar la retención que usa `make nix-clean`.
+- El tema y los plugins de Oh My Zsh: `oh_my_zsh_theme` y `oh_my_zsh_plugins` en `ansible/group_vars/all/main.yml`.
+- Los wrappers `npm`/`npx`/`yarn`/`pnpm` en `ansible/roles/shell_config/tasks/main.yml` si prefieres mantener los binarios de Node.js sin Bun como compat layer.
+- La política de limpieza en `ansible/roles/shell_config/templates/workstation-auto-clean.sh.j2` y sus variables (`workstation_cleanup_*_max_age_days`, `nix_cleanup_generation_max_age_days`) en `ansible/group_vars/all/main.yml`.
+- `nodesource_major_version` en `ansible/group_vars/all/main.yml` si quieres cambiar la versión mayor de Node.js instalada.
 - `nix_install_mode` en `ansible/group_vars/all/main.yml` si quieres elegir entre `single-user` y `multi-user`. Si una máquina ya tiene Nix multiusuario instalado, el playbook falla de forma explícita cuando pides `single-user` para que no te quedes con los usuarios `nixbld*` pensando que el modo cambió solo.
 - `DOTFILES_EDITOR` si desactivas VS Code y quieres que `EDITOR` y `VISUAL` apunten a otro binario.
 - `rustdesk_version` en `ansible/group_vars/all/main.yml` si quieres fijar otra release oficial de RustDesk.

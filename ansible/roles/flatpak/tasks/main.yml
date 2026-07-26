@@ -9,31 +9,25 @@
     - flatpak
 
 - name: Ensure Flathub is configured system-wide
-  ansible.builtin.command:
-    cmd: flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-  register: flatpak_flathub_remote_add
-  failed_when: false
   when:
     - common_flatpak_apps | length > 0
     - "'flathub' not in flatpak_remotes.stdout_lines"
-  changed_when: false
   tags:
     - flatpak
-
-- name: Warn when Flathub remote setup fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not configure the system Flathub remote.
-      Bootstrap will continue, but Flatpak app installation may fail later.
-      Details: {{ flatpak_flathub_remote_add.stderr | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_flatpak_apps | length > 0
-    - "'flathub' not in flatpak_remotes.stdout_lines"
-    - flatpak_flathub_remote_add is defined
-    - flatpak_flathub_remote_add.failed | default(false)
-  tags:
-    - flatpak
+  block:
+    - name: Add the system Flathub remote
+      ansible.builtin.command:
+        cmd: flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      changed_when: false
+  rescue:
+    - name: Warn when Flathub remote setup fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not configure the system Flathub remote.
+          Bootstrap will continue, but Flatpak app installation may fail later.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
 
 - name: Check which Flatpak applications are already installed
   ansible.builtin.command:
@@ -46,12 +40,12 @@
   tags:
     - flatpak
 
-- name: Install missing Flatpak applications from Flathub
+- name: Install missing Flatpak applications from Flathub # noqa: ignore-errors
   ansible.builtin.command:
     cmd: flatpak install --system --noninteractive flathub {{ item.item }}
   loop: "{{ flatpak_install_checks.results | default([]) }}"
   register: flatpak_install_results
-  failed_when: false
+  ignore_errors: true
   when:
     - common_flatpak_apps | length > 0
     - item.rc != 0

@@ -9,40 +9,6 @@
   tags:
     - nix-clean
 
-- name: Prune old generations from managed Nix profiles
-  become: false
-  ansible.builtin.shell: |
-    set -Eeuo pipefail
-
-    profile_paths=(
-      '{{ common_home_manager_profile_path }}'
-      '{{ common_home_manager_legacy_profile_path }}'
-      '{{ common_home_manager_state_legacy_profile_path }}'
-      '{{ common_home_manager_global_legacy_profile_path }}'
-    )
-
-    for profile_path in "${profile_paths[@]}"; do
-      if [[ ! -L "$profile_path" ]]; then
-        continue
-      fi
-
-      nix-env --profile "$profile_path" --delete-generations '{{ nix_cleanup_generation_max_age_days }}d'
-    done
-  args:
-    executable: /bin/bash
-  environment:
-    PATH: >-
-      {{
-        (ansible_env.PATH | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'))
-        + ':/nix/var/nix/profiles/default/bin:'
-        + local_home
-        + '/.nix-profile/bin'
-      }}
-  changed_when: false
-  when: common_enable_nix
-  tags:
-    - nix-clean
-
 - name: Garbage collect unreachable Nix store paths
   become: false
   ansible.builtin.command:

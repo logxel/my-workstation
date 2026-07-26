@@ -1,60 +1,31 @@
 ---
-- name: Install virt-manager and libvirt packages
-  ansible.builtin.apt:
-    name: "{{ virt_manager_packages }}"
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
-  register: virt_manager_package_install
-  failed_when: false
+- name: Install virt-manager/libvirt packages and start the libvirt daemon
   when: common_enable_virt_manager
   tags:
     - virt-manager
     - virtualization
+  block:
+    - name: Install virt-manager and libvirt packages
+      ansible.builtin.apt:
+        name: "{{ virt_manager_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
 
-- name: Warn when virt-manager package installation fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not install one or more virt-manager/libvirt packages.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ virt_manager_package_install.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_virt_manager
-    - virt_manager_package_install is defined
-    - virt_manager_package_install.failed | default(false)
-  tags:
-    - virt-manager
-    - virtualization
-
-- name: Ensure the libvirt daemon is enabled and started
-  ansible.builtin.systemd:
-    name: libvirtd
-    enabled: true
-    state: started
-  register: virt_manager_libvirtd_state
-  failed_when: false
-  when:
-    - common_enable_virt_manager
-    - not (virt_manager_package_install is defined and virt_manager_package_install.failed | default(false))
-  tags:
-    - virt-manager
-    - virtualization
-
-- name: Warn when libvirtd startup fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not enable or start libvirtd.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ virt_manager_libvirtd_state.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_virt_manager
-    - virt_manager_libvirtd_state is defined
-    - virt_manager_libvirtd_state.failed | default(false)
-  tags:
-    - virt-manager
-    - virtualization
+    - name: Ensure the libvirt daemon is enabled and started
+      ansible.builtin.systemd:
+        name: libvirtd
+        enabled: true
+        state: started
+  rescue:
+    - name: Warn when virt-manager/libvirt setup fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not finish virt-manager/libvirt setup (package install or libvirtd
+          startup failed). Bootstrap will continue without failing this optional feature.
+          Failed step: {{ ansible_failed_task.name }}.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Ensure the target user can manage system virtual machines
   ansible.builtin.user:

@@ -1,0 +1,7 @@
+{{ ansible_managed | default('Managed by Ansible (roles/shell_config) — local edits will be overwritten.') }}
+[Unit]
+Description=Clean stale files and developer tool caches
+
+[Service]
+Type=oneshot
+ExecStart={{ local_home }}/.local/bin/workstation-auto-clean

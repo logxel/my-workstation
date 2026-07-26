@@ -1,0 +1,170 @@
+---
+- name: Check whether Oh My Zsh is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.oh-my-zsh"
+  register: shell_config_omz_dir
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+
+- name: Install Oh My Zsh via official installer
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.oh-my-zsh"
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    HOME: "{{ local_home }}"
+    RUNZSH: "no"
+    CHSH: "no"
+    KEEP_ZSHRC: "yes"
+  when: not shell_config_omz_dir.stat.exists
+  changed_when: true
+  tags:
+    - shell-config
+
+- name: Deploy the managed ~/.zshrc
+  ansible.builtin.template:
+    src: zshrc.j2
+    dest: "{{ local_home }}/.zshrc"
+    owner: "{{ local_user }}"
+    group: "{{ local_user }}"
+    mode: "0644"
+    force: true
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+
+- name: Ensure ~/.local/bin exists
+  ansible.builtin.file:
+    path: "{{ local_home }}/.local/bin"
+    state: directory
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+
+- name: Deploy Bun compat wrappers for npm/yarn/pnpm
+  ansible.builtin.copy:
+    dest: "{{ local_home }}/.local/bin/{{ item }}"
+    content: |
+      #!/usr/bin/env bash
+      exec "$HOME/.bun/bin/bun" "$@"
+    mode: "0755"
+  loop:
+    - npm
+    - yarn
+    - pnpm
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+
+- name: Deploy Bun compat wrapper for npx
+  ansible.builtin.copy:
+    dest: "{{ local_home }}/.local/bin/npx"
+    content: |
+      #!/usr/bin/env bash
+      exec "$HOME/.bun/bin/bunx" "$@"
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+
+- name: Deploy the workstation-auto-clean script
+  ansible.builtin.template:
+    src: workstation-auto-clean.sh.j2
+    dest: "{{ local_home }}/.local/bin/workstation-auto-clean"
+    owner: "{{ local_user }}"
+    group: "{{ local_user }}"
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Ensure the user systemd unit directory exists
+  ansible.builtin.file:
+    path: "{{ local_home }}/.config/systemd/user"
+    state: directory
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Deploy the workstation-auto-clean systemd service unit
+  ansible.builtin.template:
+    src: workstation-auto-clean.service.j2
+    dest: "{{ local_home }}/.config/systemd/user/workstation-auto-clean.service"
+    owner: "{{ local_user }}"
+    group: "{{ local_user }}"
+    mode: "0644"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Deploy the workstation-auto-clean systemd timer unit
+  ansible.builtin.template:
+    src: workstation-auto-clean.timer.j2
+    dest: "{{ local_home }}/.config/systemd/user/workstation-auto-clean.timer"
+    owner: "{{ local_user }}"
+    group: "{{ local_user }}"
+    mode: "0644"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Look up the target user's numeric UID
+  ansible.builtin.command:
+    cmd: id -u {{ local_user }}
+  register: shell_config_local_user_id
+  changed_when: false
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Enable and start the workstation-auto-clean timer
+  tags:
+    - shell-config
+    - cleanup-timer
+  block:
+    - name: Enable and start the workstation-auto-clean user timer
+      ansible.builtin.systemd:
+        name: workstation-auto-clean.timer
+        scope: user
+        enabled: true
+        state: started
+        daemon_reload: true
+      become: true
+      become_user: "{{ local_user }}"
+      environment:
+        XDG_RUNTIME_DIR: >-
+          {{
+            lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR')
+            | default('/run/user/' ~ shell_config_local_user_id.stdout | trim, true)
+          }}
+        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+  rescue:
+    - name: Warn when the workstation-auto-clean timer could not be enabled
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not enable/start the workstation-auto-clean user timer (no active user
+          systemd session in this run, e.g. a headless/container provisioning run). Log into a
+          graphical or lingering session and re-run with --tags cleanup-timer to enable it.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false

@@ -1,4 +1,4 @@
-.PHONY: lint lint-ansible lint-nix format format-ansible format-nix check-ansible-tools check-nix-tools bootstrap ansible-requirements playbook install-feature apt-clean nix-clean nix-migrate-single-user
+.PHONY: lint lint-ansible lint-nix format format-ansible format-nix check-ansible-tools check-nix-tools bootstrap ansible-requirements playbook install-feature apt-clean nix-clean nix-migrate-single-user nix-teardown
 
 NIX_DIR := ./nix
 ANSIBLE_DIR := ansible
@@ -56,6 +56,10 @@ nix-clean:
 nix-migrate-single-user:
 	@$(MAKE) check-ansible-runtime
 	ansible-playbook $(ANSIBLE_DIR)/nix-migrate-single-user.yml -K
+
+nix-teardown:
+	@$(MAKE) check-ansible-runtime
+	ansible-playbook $(ANSIBLE_DIR)/nix-teardown.yml -K
 
 lint-ansible:
 	@$(MAKE) check-ansible-tools

@@ -162,142 +162,85 @@
     - system
     - git
 
-- name: Download the pinned Git Credential Manager Debian package
-  ansible.builtin.get_url:
-    url: "{{ common_gcm_deb_url }}"
-    dest: "/tmp/{{ common_gcm_package_filename }}"
-    mode: "0644"
-    force: false
-    checksum: "{{ common_gcm_deb_checksum if common_gcm_deb_checksum | length > 0 else omit }}"
-  register: system_gcm_package_download
-  failed_when: false
+- name: Install and configure Git Credential Manager
   when: common_enable_git_credential_oauth
   tags:
     - packages
     - system
     - git
+  block:
+    - name: Download the pinned Git Credential Manager Debian package
+      ansible.builtin.get_url:
+        url: "{{ common_gcm_deb_url }}"
+        dest: "/tmp/{{ common_gcm_package_filename }}"
+        mode: "0644"
+        force: false
+        checksum: "{{ common_gcm_deb_checksum if common_gcm_deb_checksum | length > 0 else omit }}"
 
-- name: Warn when Git Credential Manager package download fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not download the Git Credential Manager Debian package.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ system_gcm_package_download.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_git_credential_oauth
-    - system_gcm_package_download is defined
-    - system_gcm_package_download.failed | default(false)
-  tags:
-    - packages
-    - system
-    - git
+    - name: Install Git Credential Manager from the pinned upstream Debian package
+      ansible.builtin.apt:
+        deb: "/tmp/{{ common_gcm_package_filename }}"
+        state: present
+        update_cache: true
 
-- name: Install Git Credential Manager from the pinned upstream Debian package
-  ansible.builtin.apt:
-    deb: "/tmp/{{ common_gcm_package_filename }}"
-    state: present
-    update_cache: true
-  register: system_gcm_package_install
-  failed_when: false
-  when: common_enable_git_credential_oauth
-  tags:
-    - packages
-    - system
-    - git
+    - name: Remove the legacy git-credential-oauth managed Git config block
+      ansible.builtin.blockinfile:
+        path: "{{ local_home }}/.gitconfig"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: git-credential-oauth"
+        state: absent
+        create: true
+        mode: "0644"
+      become: true
+      become_user: "{{ local_user }}"
 
-- name: Warn when Git Credential Manager package installation fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not install Git Credential Manager from the pinned Debian package.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ system_gcm_package_install.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_git_credential_oauth
-    - system_gcm_package_install is defined
-    - system_gcm_package_install.failed | default(false)
-  tags:
-    - packages
-    - system
-    - git
+    - name: Restart gnome-keyring-daemon to ensure clean D-Bus secret service session
+      when:
+        - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
+        - common_enable_secret_service
+      block:
+        - name: Restart gnome-keyring-daemon
+          ansible.builtin.shell:
+            cmd: >-
+              gnome-keyring-daemon -r -d
+            executable: /bin/bash
+          register: system_keyring_restart
+          changed_when: system_keyring_restart.stdout | length > 0
+          become: true
+          become_user: "{{ local_user }}"
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+            DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+            XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+      rescue:
+        - name: Warn when gnome-keyring-daemon restart fails
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not restart gnome-keyring-daemon.
+              Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+          changed_when: false
 
-- name: Remove the legacy git-credential-oauth managed Git config block
-  ansible.builtin.blockinfile:
-    path: "{{ local_home }}/.gitconfig"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK: git-credential-oauth"
-    state: absent
-    create: true
-    mode: "0644"
-  become: true
-  become_user: "{{ local_user }}"
-  when:
-    - common_enable_git_credential_oauth
-    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
-  tags:
-    - packages
-    - system
-    - git
-
-- name: Restart gnome-keyring-daemon to ensure clean D-Bus secret service session
-  ansible.builtin.shell:
-    cmd: >-
-      gnome-keyring-daemon -r -d
-    executable: /bin/bash
-  register: system_keyring_restart
-  changed_when: system_keyring_restart.stdout | length > 0
-  failed_when: false
-  become: true
-  become_user: "{{ local_user }}"
-  when:
-    - common_enable_git_credential_oauth
-    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
-    - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
-    - common_enable_secret_service
-  environment:
-    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
-    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
-    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
-  tags:
-    - packages
-    - system
-    - git
-
-- name: Configure Git Credential Manager as the global Git credential helper
-  ansible.builtin.blockinfile:
-    path: "{{ local_home }}/.gitconfig"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK: git-credential-manager"
-    block: |
-      [credential]
-        helper =
-        helper = /usr/local/bin/git-credential-manager
-        credentialStore = secretservice
-    create: true
-    mode: "0644"
-  become: true
-  become_user: "{{ local_user }}"
-  when:
-    - common_enable_git_credential_oauth
-    - not (system_gcm_package_install is defined and system_gcm_package_install.failed | default(false))
-  tags:
-    - packages
-    - system
-    - git
-
-- name: Warn when Git config update is skipped because Git Credential Manager failed to install
-  ansible.builtin.debug:
-    msg: >-
-      WARNING: Skipping Git credential helper configuration because Git Credential Manager
-      could not be installed in this run.
-  when:
-    - common_enable_git_credential_oauth
-    - system_gcm_package_install is defined
-    - system_gcm_package_install.failed | default(false)
-  changed_when: false
-  tags:
-    - packages
-    - system
-    - git
+    - name: Configure Git Credential Manager as the global Git credential helper
+      ansible.builtin.blockinfile:
+        path: "{{ local_home }}/.gitconfig"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: git-credential-manager"
+        block: |
+          [credential]
+            helper =
+            helper = /usr/local/bin/git-credential-manager
+            credentialStore = secretservice
+        create: true
+        mode: "0644"
+      become: true
+      become_user: "{{ local_user }}"
+  rescue:
+    - name: Warn when Git Credential Manager install/configuration fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not finish installing/configuring Git Credential Manager
+          (download, install, or config step failed). Bootstrap will continue without
+          failing this optional feature. Failed step: {{ ansible_failed_task.name }}.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Report when clipboard-history auto mode defers to an existing clipboard manager
   ansible.builtin.debug:

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+{{ ansible_managed | default('Managed by Ansible (roles/shell_config) — local edits will be overwritten.') }}
+set -Eeuo pipefail
+
+clean_old_files() {
+  local target="$1"
+  local age_days="$2"
+
+  if [[ ! -d "$target" ]]; then
+    return 0
+  fi
+
+  find "$target" -mindepth 1 \( -type f -o -type l \) -mtime +"$age_days" -print -delete
+  find "$target" -mindepth 1 -depth -type d -empty -mtime +"$age_days" -print -delete
+}
+
+run_if_available() {
+  local binary="$1"
+  shift
+
+  if ! command -v "$binary" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! "$@"; then
+    printf 'Skipping failed cleanup command: %s\n' "$*" >&2
+  fi
+}
+
+clean_old_files "$HOME/Downloads" {{ workstation_cleanup_downloads_max_age_days }}
+
+clean_old_files "$HOME/.bun/install/cache" {{ workstation_cleanup_bun_cache_max_age_days }}
+clean_old_files "$HOME/.cache/cargo-target" {{ workstation_cleanup_cargo_target_max_age_days }}
+clean_old_files "$HOME/.cache/go-build" {{ workstation_cleanup_go_build_max_age_days }}
+clean_old_files "$HOME/.cache/go/pkg/mod" {{ workstation_cleanup_go_mod_max_age_days }}
+
+run_if_available uv uv cache prune
+run_if_available direnv direnv prune
+run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ nix_cleanup_generation_max_age_days }}d

@@ -13,6 +13,15 @@
     - vscode
     - brave
 
+- name: Install Warp Terminal from its official repository
+  ansible.builtin.apt:
+    name: warp-terminal
+    state: present
+  when: common_enable_warp_terminal
+  tags:
+    - applications
+    - warp-terminal
+
 - name: Ensure the VS Code runtime arguments directory exists
   ansible.builtin.file:
     path: "{{ local_home }}/.vscode"
@@ -148,88 +157,56 @@
     - rustdesk
 
 - name: Download the pinned RustDesk Debian package
-  ansible.builtin.get_url:
-    url: >-
-      https://github.com/rustdesk/rustdesk/releases/download/{{ rustdesk_version
-      }}/{{ rustdesk_package_filename }}
-    dest: /tmp/{{ rustdesk_package_filename }}
-    mode: "0644"
-    force: false
-  vars:
-    rustdesk_package_filename: >-
-      rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
-  register: desktop_apps_rustdesk_package_download
-  failed_when: false
   tags:
     - applications
     - rustdesk
+  block:
+    - name: Fetch the pinned RustDesk Debian package
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/rustdesk/rustdesk/releases/download/{{ rustdesk_version
+          }}/{{ rustdesk_package_filename }}
+        dest: /tmp/{{ rustdesk_package_filename }}
+        mode: "0644"
+        force: false
+      vars:
+        rustdesk_package_filename: >-
+          rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
+  rescue:
+    - name: Warn when RustDesk package download fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not download the RustDesk Debian package.
+          Bootstrap will continue without failing this optional feature.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
-- name: Warn when RustDesk package download fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not download the RustDesk Debian package.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ desktop_apps_rustdesk_package_download.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - desktop_apps_rustdesk_package_download is defined
-    - desktop_apps_rustdesk_package_download.failed | default(false)
+- name: Install RustDesk and start its system service
   tags:
     - applications
     - rustdesk
+  block:
+    - name: Install RustDesk from the pinned upstream Debian package
+      ansible.builtin.apt:
+        deb: /tmp/{{ rustdesk_package_filename }}
+        state: present
+        update_cache: true
+      vars:
+        rustdesk_package_filename: >-
+          rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
 
-- name: Install RustDesk from the pinned upstream Debian package
-  ansible.builtin.apt:
-    deb: /tmp/{{ rustdesk_package_filename }}
-    state: present
-    update_cache: true
-  vars:
-    rustdesk_package_filename: >-
-      rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
-  register: desktop_apps_rustdesk_package_install
-  failed_when: false
-  tags:
-    - applications
-    - rustdesk
-
-- name: Warn when RustDesk package installation fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not install RustDesk from the pinned Debian package.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ desktop_apps_rustdesk_package_install.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - desktop_apps_rustdesk_package_install is defined
-    - desktop_apps_rustdesk_package_install.failed | default(false)
-  tags:
-    - applications
-    - rustdesk
-
-- name: Ensure the RustDesk system service is enabled and started
-  ansible.builtin.systemd:
-    name: rustdesk
-    enabled: true
-    state: started
-    daemon_reload: true
-  register: desktop_apps_rustdesk_service_state
-  failed_when: false
-  when: not (desktop_apps_rustdesk_package_install is defined and desktop_apps_rustdesk_package_install.failed |
-    default(false))
-  tags:
-    - applications
-    - rustdesk
-
-- name: Warn when RustDesk service startup fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not enable or start the RustDesk service.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ desktop_apps_rustdesk_service_state.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - desktop_apps_rustdesk_service_state is defined
-    - desktop_apps_rustdesk_service_state.failed | default(false)
-  tags:
-    - applications
-    - rustdesk
+    - name: Ensure the RustDesk system service is enabled and started
+      ansible.builtin.systemd:
+        name: rustdesk
+        enabled: true
+        state: started
+        daemon_reload: true
+  rescue:
+    - name: Warn when RustDesk install/service startup fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not finish installing RustDesk or starting its service.
+          Bootstrap will continue without failing this optional feature.
+          Failed step: {{ ansible_failed_task.name }}.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false

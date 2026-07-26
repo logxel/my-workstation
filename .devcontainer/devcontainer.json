@@ -27,5 +27,5 @@
       }
     }
   },
-  "postCreateCommand": "bash -c 'set -Eeuo pipefail; nix profile add nixpkgs#home-manager nixpkgs#statix nixpkgs#nixpkgs-fmt; DOTFILES_USER=\"$USER\" DOTFILES_HOME=\"$HOME\" NIX_SYSTEM=\"$(nix eval --impure --raw --expr builtins.currentSystem)\" nix flake check --impure ${containerWorkspaceFolder}/nix'"
+  "postCreateCommand": "bash -c 'set -Eeuo pipefail; nix profile add nixpkgs#statix nixpkgs#nixpkgs-fmt; DOTFILES_USER=\"$USER\" DOTFILES_HOME=\"$HOME\" NIX_SYSTEM=\"$(nix eval --impure --raw --expr builtins.currentSystem)\" nix flake check --impure ${containerWorkspaceFolder}/nix'"
 }

@@ -33,7 +33,6 @@
     executable: /bin/bash
   args:
     creates: "{{ local_home }}/.rustup"
-    warn: false
   become: true
   become_user: "{{ local_user }}"
   environment:

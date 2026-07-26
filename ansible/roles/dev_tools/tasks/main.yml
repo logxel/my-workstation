@@ -1,0 +1,104 @@
+---
+- name: Check whether Bun is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.bun/bin/bun"
+  register: dev_tools_bun_bin
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - dev-tools
+    - bun
+
+- name: Install Bun via official installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail; curl -fsSL https://bun.sh/install | bash
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.bun/bin/bun"
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    HOME: "{{ local_home }}"
+  when: not dev_tools_bun_bin.stat.exists
+  changed_when: true
+  tags:
+    - dev-tools
+    - bun
+
+- name: Check whether uv is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/uv"
+  register: dev_tools_uv_bin
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - dev-tools
+    - uv
+
+- name: Install uv via official installer
+  ansible.builtin.shell:
+    cmd: set -o pipefail; curl -LsSf https://astral.sh/uv/install.sh | sh
+    executable: /bin/bash
+  args:
+    creates: "{{ local_home }}/.local/bin/uv"
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    HOME: "{{ local_home }}"
+  when: not dev_tools_uv_bin.stat.exists
+  changed_when: true
+  tags:
+    - dev-tools
+    - uv
+
+- name: Check whether dust is already installed
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/share/cargo/bin/dust"
+  register: dev_tools_dust_bin
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - dev-tools
+    - dust
+
+- name: Install dust via cargo
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      {{ local_home }}/.local/share/cargo/bin/cargo install du-dust
+    executable: /bin/bash
+  become: true
+  become_user: "{{ local_user }}"
+  environment:
+    CARGO_HOME: "{{ local_home }}/.local/share/cargo"
+    RUSTUP_HOME: "{{ local_home }}/.rustup"
+  when:
+    - not dev_tools_dust_bin.stat.exists
+    - common_enable_rustup
+  changed_when: true
+  tags:
+    - dev-tools
+    - dust
+
+- name: Warn when dust cannot be installed because rustup is disabled # noqa: ignore-errors
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Skipping dust (du-dust) install because the rustup role is disabled
+      and no cargo toolchain is available to build it.
+  when:
+    - not dev_tools_dust_bin.stat.exists
+    - not common_enable_rustup
+  changed_when: false
+  tags:
+    - dev-tools
+    - dust
+
+- name: Install Node.js from the NodeSource repository
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags:
+    - dev-tools
+    - nodejs

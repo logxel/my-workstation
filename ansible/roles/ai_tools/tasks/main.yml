@@ -12,7 +12,6 @@
     executable: /bin/bash
   args:
     creates: "{{ local_home }}/.local/bin/apm"
-    warn: false
   become: true
   become_user: "{{ local_user }}"
   register: ai_tools_apm_official
@@ -75,7 +74,6 @@
     executable: /bin/bash
   args:
     creates: "{{ local_home }}/.opencode/bin/opencode"
-    warn: false
   become: true
   become_user: "{{ local_user }}"
   environment:

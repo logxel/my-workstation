@@ -80,33 +80,29 @@
     - clipboard-history
 
 - name: Install Ringboard with Iced GUI via official install script
-  ansible.builtin.command:
-    cmd: /tmp/install-ringboard.sh
-  environment:
-    RINGBOARD_CLIENT: iced
-    RINGBOARD_REPO: axellpadilla/clipboard-history
-    RINGBOARD_BRANCH: "{{ clipboard_history_branch }}"
-    PATH: "{{ local_home }}/.cargo/bin:{{ lookup('env', 'PATH') }}"
-  become: false
-  register: system_ringboard_install
-  failed_when: false
-  changed_when: false
   when: system_ringboard_is_installed is not defined or not system_ringboard_is_installed
   tags:
     - clipboard-history
-
-- name: Warn when Ringboard install script fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not install Ringboard via the official script.
-      Bootstrap will continue without failing this optional feature.
-      Details: {{ system_ringboard_install.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - system_ringboard_install is defined
-    - system_ringboard_install.failed | default(false)
-  tags:
-    - clipboard-history
+  block:
+    - name: Run the Ringboard official install script
+      ansible.builtin.command:
+        cmd: /tmp/install-ringboard.sh
+      environment:
+        RINGBOARD_CLIENT: iced
+        RINGBOARD_REPO: axellpadilla/clipboard-history
+        RINGBOARD_BRANCH: "{{ clipboard_history_branch }}"
+        PATH: "{{ local_home }}/.cargo/bin:{{ lookup('env', 'PATH') }}"
+      become: false
+      changed_when: true
+  rescue:
+    - name: Warn when Ringboard install script fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not install Ringboard via the official script.
+          Bootstrap will continue without failing this optional feature.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
 
 - name: Remove stale egui desktop entry (install script only keeps the active client)
   ansible.builtin.file:
@@ -195,118 +191,103 @@
     - clipboard-history
 
 - name: Ensure GNOME notification center no longer claims Super+V
-  ansible.builtin.command:
-    argv:
-      - gsettings
-      - set
-      - org.gnome.shell.keybindings
-      - toggle-message-tray
-      - "['<Super><Shift>v']"
-  register: system_clipboard_history_gnome_message_tray_binding
-  failed_when: false
-  environment:
-    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
-    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
-    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
   when:
     - common_clipboard_history_is_gnome_family
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
-  changed_when: false
   tags:
     - clipboard-history
-
-- name: Warn when GNOME notification center shortcut remap fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not set org.gnome.shell.keybindings.toggle-message-tray for clipboard-history.
-      Bootstrap will continue.
-      Details: {{ system_clipboard_history_gnome_message_tray_binding.stderr | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - system_clipboard_history_gnome_message_tray_binding is defined
-    - system_clipboard_history_gnome_message_tray_binding.failed | default(false)
-  changed_when: false
-  tags:
-    - clipboard-history
+  block:
+    - name: Remap GNOME notification center toggle-message-tray binding
+      ansible.builtin.command:
+        argv:
+          - gsettings
+          - set
+          - org.gnome.shell.keybindings
+          - toggle-message-tray
+          - "['<Super><Shift>v']"
+      environment:
+        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+        DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+        XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+      changed_when: false
+  rescue:
+    - name: Warn when GNOME notification center shortcut remap fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not set org.gnome.shell.keybindings.toggle-message-tray for clipboard-history.
+          Bootstrap will continue.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
 
 - name: Ensure GNOME quick settings no longer claims Super+V
-  ansible.builtin.command:
-    argv:
-      - gsettings
-      - set
-      - org.gnome.shell.keybindings
-      - toggle-quick-settings
-      - "[]"
-  register: system_clipboard_history_gnome_quick_settings_binding
-  failed_when: false
-  environment:
-    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
-    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
-    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
   when:
     - common_clipboard_history_is_gnome_family
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
-  changed_when: false
   tags:
     - clipboard-history
-
-- name: Warn when GNOME quick settings shortcut remap fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not set org.gnome.shell.keybindings.toggle-quick-settings for clipboard-history.
-      Bootstrap will continue.
-      Details: {{ system_clipboard_history_gnome_quick_settings_binding.stderr | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - system_clipboard_history_gnome_quick_settings_binding is defined
-    - system_clipboard_history_gnome_quick_settings_binding.failed | default(false)
-  changed_when: false
-  tags:
-    - clipboard-history
+  block:
+    - name: Remap GNOME quick settings toggle-quick-settings binding
+      ansible.builtin.command:
+        argv:
+          - gsettings
+          - set
+          - org.gnome.shell.keybindings
+          - toggle-quick-settings
+          - "[]"
+      environment:
+        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+        DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+        XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+      changed_when: false
+  rescue:
+    - name: Warn when GNOME quick settings shortcut remap fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not set org.gnome.shell.keybindings.toggle-quick-settings for clipboard-history.
+          Bootstrap will continue.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
 
 - name: Ensure clipboard-history GNOME custom shortcut is registered
-  ansible.builtin.shell: |
-    set -eo pipefail
-    base='/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings'
-    entry="${base}/clipboard-history/"
-    current="$(dconf read "${base}")"
-    if [ -z "$current" ] || [ "$current" = "@as []" ]; then
-      dconf write "${base}" "['${entry}']"
-    elif ! echo "$current" | grep -Fq "$entry"; then
-      new_list="$(echo "$current" | sed "s|]\$|, '${entry}']|")"
-      dconf write "${base}" "$new_list"
-    fi
-    dconf write "${entry}binding" "'<Super>v'"
-    dconf write "${entry}command" "'{{ local_home }}/.cargo/bin/ringboard-iced toggle'"
-    dconf write "${entry}name" "'Clipboard History'"
-  args:
-    executable: /bin/bash
-  environment:
-    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
-    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
-    XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
-  register: system_clipboard_history_gnome_custom_shortcut
-  failed_when: false
   when:
     - common_clipboard_history_is_gnome_family
     - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
   become: false
-  changed_when: false
   tags:
     - clipboard-history
-
-- name: Warn when GNOME custom shortcut registration fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not register the clipboard-history custom GNOME shortcut.
-      Bootstrap will continue.
-      Details: {{ system_clipboard_history_gnome_custom_shortcut.stderr | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - system_clipboard_history_gnome_custom_shortcut is defined
-    - system_clipboard_history_gnome_custom_shortcut.failed | default(false)
-  changed_when: false
-  tags:
-    - clipboard-history
+  block:
+    - name: Register the clipboard-history GNOME custom shortcut
+      ansible.builtin.shell: |
+        set -eo pipefail
+        base='/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings'
+        entry="${base}/clipboard-history/"
+        current="$(dconf read "${base}")"
+        if [ -z "$current" ] || [ "$current" = "@as []" ]; then
+          dconf write "${base}" "['${entry}']"
+        elif ! echo "$current" | grep -Fq "$entry"; then
+          new_list="$(echo "$current" | sed "s|]\$|, '${entry}']|")"
+          dconf write "${base}" "$new_list"
+        fi
+        dconf write "${entry}binding" "'<Super>v'"
+        dconf write "${entry}command" "'{{ local_home }}/.cargo/bin/ringboard-iced toggle'"
+        dconf write "${entry}name" "'Clipboard History'"
+      args:
+        executable: /bin/bash
+      environment:
+        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+        DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+        XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+      changed_when: false
+  rescue:
+    - name: Warn when GNOME custom shortcut registration fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not register the clipboard-history custom GNOME shortcut.
+          Bootstrap will continue.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false

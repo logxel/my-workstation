@@ -1,0 +1,172 @@
+---
+- name: Look up the target user's numeric UID
+  ansible.builtin.command:
+    cmd: id -u {{ local_user }}
+  become: false
+  register: nix_teardown_local_user_id
+  changed_when: false
+  tags:
+    - nix-teardown
+
+- name: Stop and disable the workstation-auto-clean user timer and service # noqa: ignore-errors
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    scope: user
+    enabled: false
+    state: stopped
+  become: false
+  loop:
+    - workstation-auto-clean.timer
+    - workstation-auto-clean.service
+  environment:
+    XDG_RUNTIME_DIR: >-
+      {{
+        lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR')
+        | default('/run/user/' ~ nix_teardown_local_user_id.stdout | trim, true)
+      }}
+    DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+  register: nix_teardown_disable_timer
+  ignore_errors: true
+  tags:
+    - nix-teardown
+
+- name: Report when the workstation-auto-clean timer could not be disabled # noqa: ignore-errors
+  ansible.builtin.debug:
+    msg: >-
+      Could not disable the workstation-auto-clean user timer (it may already be gone, or
+      there is no active user systemd session in this run). Continuing teardown.
+  when: >-
+    nix_teardown_disable_timer.results | default([])
+    | selectattr('failed', 'defined') | selectattr('failed') | list | length > 0
+  changed_when: false
+  tags:
+    - nix-teardown
+
+- name: Remove the workstation-auto-clean systemd unit files installed by Home Manager
+  ansible.builtin.file:
+    path: "{{ local_home }}/.config/systemd/user/{{ item }}"
+    state: absent
+  become: false
+  loop:
+    - workstation-auto-clean.timer
+    - workstation-auto-clean.service
+  tags:
+    - nix-teardown
+
+- name: Check which Bun compat wrappers point into the Nix store
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/{{ item }}"
+  become: false
+  loop:
+    - npm
+    - npx
+    - yarn
+    - pnpm
+  register: nix_teardown_compat_wrapper_stat
+  tags:
+    - nix-teardown
+
+- name: Remove Nix-store-linked Bun compat wrappers
+  ansible.builtin.file:
+    path: "{{ local_home }}/.local/bin/{{ item.item }}"
+    state: absent
+  become: false
+  loop: "{{ nix_teardown_compat_wrapper_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - item.stat.exists
+    - item.stat.islnk | default(false)
+    - item.stat.lnk_source is defined
+    - "'/nix/store/' in item.stat.lnk_source"
+  tags:
+    - nix-teardown
+
+- name: Delete the Home Manager named and legacy Nix profiles
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  become: false
+  loop:
+    - "{{ common_home_manager_profile_path }}"
+    - "{{ common_home_manager_legacy_profile_path }}"
+    - "{{ common_home_manager_state_legacy_profile_path }}"
+    - "{{ common_home_manager_global_legacy_profile_path }}"
+  tags:
+    - nix-teardown
+
+- name: Check whether .zshrc still points into the Nix store
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.zshrc"
+  become: false
+  register: nix_teardown_zshrc_stat
+  tags:
+    - nix-teardown
+
+- name: Check whether .zshenv still points into the Nix store
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.zshenv"
+  become: false
+  register: nix_teardown_zshenv_stat
+  tags:
+    - nix-teardown
+
+- name: Restore backed-up dotfiles that Home Manager's activation had displaced
+  ansible.builtin.command:
+    cmd: mv -v "{{ local_home }}/{{ item.file }}.home-manager-backup" "{{ local_home }}/{{ item.file }}"
+  become: false
+  loop:
+    - file: .zshrc
+      stat: "{{ nix_teardown_zshrc_stat }}"
+    - file: .zshenv
+      stat: "{{ nix_teardown_zshenv_stat }}"
+  loop_control:
+    label: "{{ item.file }}"
+  register: nix_teardown_restore_dotfiles
+  changed_when: nix_teardown_restore_dotfiles.rc == 0
+  failed_when: false
+  when:
+    - item.stat.stat.exists
+    - item.stat.stat.islnk | default(false)
+    - item.stat.stat.lnk_source is defined
+    - "'/nix/store/' in item.stat.stat.lnk_source"
+  tags:
+    - nix-teardown
+
+- name: Flip the nix feature flag off so future runs stop re-activating Home Manager
+  ansible.builtin.debug:
+    msg: >-
+      Home Manager has been torn down. Set feature_flags.nix: disabled in
+      ansible/group_vars/all/override.yml if you no longer want this host to
+      reinstall the Nix binary either, then re-run the normal playbook so
+      shell_config/dev_tools/desktop_apps replace what Home Manager used to manage.
+  changed_when: false
+  tags:
+    - nix-teardown
+
+- name: Garbage collect the now-unreferenced Nix store paths
+  tags:
+    - nix-teardown
+  block:
+    - name: Run nix-collect-garbage -d
+      ansible.builtin.command:
+        cmd: nix-collect-garbage -d
+      become: false
+      environment:
+        PATH: >-
+          {{
+            (ansible_env.PATH | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'))
+            + ':/nix/var/nix/profiles/default/bin:'
+            + local_home
+            + '/.nix-profile/bin'
+          }}
+      changed_when: false
+  rescue:
+    - name: Warn when the deep Nix garbage collection failed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: `nix-collect-garbage -d` failed or Nix is not on PATH in this run.
+          Re-run manually once a shell session with Nix sourced is available.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false

@@ -1,0 +1,54 @@
+{{ ansible_managed | default('Managed by Ansible (roles/shell_config) — local edits will be overwritten.') }}
+
+# --- Nix (kept for `nix shell` / `nix develop`) ---
+if [[ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+elif [[ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]]; then
+  . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+
+# --- direnv ---
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi
+
+# --- Oh My Zsh ---
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="{{ oh_my_zsh_theme }}"
+plugins=({{ oh_my_zsh_plugins | join(' ') }})
+if [[ -f "$ZSH/oh-my-zsh.sh" ]]; then
+  source "$ZSH/oh-my-zsh.sh"
+fi
+
+setopt AUTO_CD
+autoload -Uz compinit && compinit
+
+if [[ -f /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]]; then
+  source /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+fi
+if [[ -f /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]]; then
+  source /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi
+
+# --- Session variables ---
+export EDITOR="{{ dotfiles_editor_command }}"
+export VISUAL="{{ dotfiles_editor_command }}"
+export BUN_INSTALL="$HOME/.bun"
+export CARGO_HOME="$HOME/.local/share/cargo"
+export RUSTUP_HOME="$HOME/.rustup"
+export CARGO_TARGET_DIR="$HOME/.cache/cargo-target"
+export GOCACHE="$HOME/.cache/go-build"
+export GOMODCACHE="$HOME/.cache/go/pkg/mod"
+export GOPATH="$HOME/.local/share/go"
+
+# --- PATH ---
+export PATH="$HOME/.bun/bin:$CARGO_HOME/bin:$HOME/.local/bin:$PATH"
+
+# --- Aliases ---
+alias ll="ls -lah"
+alias cargo-release="CARGO_INCREMENTAL=0 RUSTFLAGS='-C target-cpu=native -C codegen-units=1' cargo build --release"
+alias go-release="GOMAXPROCS=$(nproc) go build ./..."
+alias npm="bun"
+alias npx="bunx"
+alias yarn="bun"
+alias pnpm="bun"

@@ -15,7 +15,12 @@
     owner: root
     group: root
     mode: "0755"
-  when: common_enable_vscode or common_enable_edge or common_enable_docker
+  when: >-
+    common_enable_vscode
+    or common_enable_edge
+    or common_enable_docker
+    or common_enable_dev_tools
+    or common_enable_warp_terminal
   tags:
     - packages
     - system
@@ -23,17 +28,11 @@
     - vscode
     - edge
     - docker
+    - dev-tools
+    - nodejs
+    - warp-terminal
 
 - name: Install the Microsoft APT signing key into a dedicated keyring
-  ansible.builtin.get_url:
-    url: https://packages.microsoft.com/keys/microsoft.asc
-    dest: /etc/apt/keyrings/microsoft.asc
-    owner: root
-    group: root
-    mode: "0644"
-    force: true
-  register: apt_repositories_microsoft_key_fetch
-  failed_when: false
   when: common_enable_vscode or common_enable_edge
   tags:
     - packages
@@ -41,98 +40,81 @@
     - repos
     - vscode
     - edge
-
-- name: Warn when Microsoft APT signing key could not be refreshed # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not refresh the Microsoft APT key.
-      VS Code/Edge repository operations will continue, but package installs may fail later.
-      Details: {{ apt_repositories_microsoft_key_fetch.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_vscode or common_enable_edge
-    - apt_repositories_microsoft_key_fetch is defined
-    - apt_repositories_microsoft_key_fetch.failed | default(false)
-  tags:
-    - packages
-    - system
-    - repos
-    - vscode
-    - edge
+  block:
+    - name: Fetch the Microsoft APT signing key
+      ansible.builtin.get_url:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        dest: /etc/apt/keyrings/microsoft.asc
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+  rescue:
+    - name: Warn when Microsoft APT signing key could not be refreshed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not refresh the Microsoft APT key.
+          VS Code/Edge repository operations will continue, but package installs may fail later.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Render the VS Code repository definition
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/vscode.list
-    content: "{{ (vscode_repo_parts | join(' ')) ~ '\n' }}"
-    owner: root
-    group: root
-    mode: "0644"
-  vars:
-    vscode_repo_parts:
-      - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
-      - https://packages.microsoft.com/repos/code
-      - stable
-      - main
-  register: apt_repositories_vscode_repo_render
-  failed_when: false
   when: common_enable_vscode
   tags:
     - repos
     - vscode
-
-- name: Warn when VS Code repository definition could not be rendered # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not render the VS Code repository definition.
-      Bootstrap will continue without failing the run.
-      Details: {{ apt_repositories_vscode_repo_render.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_vscode
-    - apt_repositories_vscode_repo_render is defined
-    - apt_repositories_vscode_repo_render.failed | default(false)
-  tags:
-    - repos
-    - vscode
+  block:
+    - name: Write the VS Code repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/vscode.list
+        content: "{{ (vscode_repo_parts | join(' ')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        vscode_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
+          - https://packages.microsoft.com/repos/code
+          - stable
+          - main
+  rescue:
+    - name: Warn when VS Code repository definition could not be rendered
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not render the VS Code repository definition.
+          Bootstrap will continue without failing the run.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Render the Microsoft Edge repository definition
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/microsoft-edge-stable.list
-    content: "{{ (edge_repo_parts | join(' ')) ~ '\n' }}"
-    owner: root
-    group: root
-    mode: "0644"
-  vars:
-    edge_repo_parts:
-      - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
-      - https://packages.microsoft.com/repos/edge
-      - stable
-      - main
-  register: apt_repositories_edge_repo_render
-  failed_when: false
   when: common_enable_edge
   tags:
     - packages
     - system
     - repos
     - edge
-
-- name: Warn when Microsoft Edge repository definition could not be rendered # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not render the Microsoft Edge repository definition.
-      Bootstrap will continue without failing the run.
-      Details: {{ apt_repositories_edge_repo_render.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_edge
-    - apt_repositories_edge_repo_render is defined
-    - apt_repositories_edge_repo_render.failed | default(false)
-  tags:
-    - packages
-    - system
-    - repos
-    - edge
+  block:
+    - name: Write the Microsoft Edge repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/microsoft-edge-stable.list
+        content: "{{ (edge_repo_parts | join(' ')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        edge_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
+          - https://packages.microsoft.com/repos/edge
+          - stable
+          - main
+  rescue:
+    - name: Warn when Microsoft Edge repository definition could not be rendered
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not render the Microsoft Edge repository definition.
+          Bootstrap will continue without failing the run.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Remove legacy Brave source file with Signed-By keyring
   ansible.builtin.file:
@@ -144,58 +126,44 @@
     - brave
 
 - name: Add Brave APT signing key
-  ansible.builtin.apt_key:
-    url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-    state: present
-  register: apt_repositories_brave_key_add
-  failed_when: false
   when: common_enable_brave
   tags:
     - repos
     - brave
-
-- name: Warn when Brave APT signing key could not be refreshed # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not refresh the Brave APT key.
-      Brave repository operations will continue, but package installs may fail later.
-      Details: {{ apt_repositories_brave_key_add.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_brave
-    - apt_repositories_brave_key_add is defined
-    - apt_repositories_brave_key_add.failed | default(false)
-  tags:
-    - repos
-    - brave
+  block:
+    - name: Add the Brave APT signing key to the system keyring
+      ansible.builtin.apt_key:
+        url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+        state: present
+  rescue:
+    - name: Warn when Brave APT signing key could not be refreshed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not refresh the Brave APT key.
+          Brave repository operations will continue, but package installs may fail later.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Register the Brave repository
-  ansible.builtin.apt_repository:
-    repo: "deb [arch={{ common_deb_arch }}] https://brave-browser-apt-release.s3.brave.com/ stable main"
-    state: present
-    filename: brave-browser-release
-    update_cache: false
-  register: apt_repositories_brave_repo_register
-  failed_when: false
   when: common_enable_brave
   tags:
     - repos
     - brave
-
-- name: Warn when Brave repository registration fails # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not register the Brave repository.
-      Bootstrap will continue without failing the run.
-      Details: {{ apt_repositories_brave_repo_register.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_brave
-    - apt_repositories_brave_repo_register is defined
-    - apt_repositories_brave_repo_register.failed | default(false)
-  tags:
-    - repos
-    - brave
+  block:
+    - name: Add the Brave APT repository definition
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ common_deb_arch }}] https://brave-browser-apt-release.s3.brave.com/ stable main"
+        state: present
+        filename: brave-browser-release
+        update_cache: false
+  rescue:
+    - name: Warn when Brave repository registration fails
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not register the Brave repository.
+          Bootstrap will continue without failing the run.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Remove legacy Docker source file with Signed-By keyring
   ansible.builtin.file:
@@ -207,77 +175,154 @@
     - docker
 
 - name: Install the Docker APT signing key into a dedicated keyring
-  ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    dest: /etc/apt/keyrings/docker.asc
-    owner: root
-    group: root
-    mode: "0644"
-    force: true
-  register: apt_repositories_docker_key_fetch
-  failed_when: false
   when: common_enable_docker
   tags:
     - packages
     - system
     - repos
     - docker
-
-- name: Warn when Docker APT signing key could not be refreshed # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not refresh the Docker APT key.
-      Docker repository operations will continue, but package installs may fail later.
-      Details: {{ apt_repositories_docker_key_fetch.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_docker
-    - apt_repositories_docker_key_fetch is defined
-    - apt_repositories_docker_key_fetch.failed | default(false)
-  tags:
-    - packages
-    - system
-    - repos
-    - docker
+  block:
+    - name: Fetch the Docker APT signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+  rescue:
+    - name: Warn when Docker APT signing key could not be refreshed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not refresh the Docker APT key.
+          Docker repository operations will continue, but package installs may fail later.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Render the Docker repository definition
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/docker.list
-    content: "{{ (docker_repo_parts | join(' ')) ~ '\n' }}"
-    owner: root
-    group: root
-    mode: "0644"
-  vars:
-    docker_repo_parts:
-      - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/docker.asc]"
-      - https://download.docker.com/linux/ubuntu
-      - "{{ common_ubuntu_codename }}"
-      - stable
-  register: apt_repositories_docker_repo_render
-  failed_when: false
   when: common_enable_docker
   tags:
     - packages
     - system
     - repos
     - docker
+  block:
+    - name: Write the Docker repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.list
+        content: "{{ (docker_repo_parts | join(' ')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        docker_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/docker.asc]"
+          - https://download.docker.com/linux/ubuntu
+          - "{{ common_ubuntu_codename }}"
+          - stable
+  rescue:
+    - name: Warn when Docker repository definition could not be rendered
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not render the Docker repository definition.
+          Bootstrap will continue without failing the run.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
-- name: Warn when Docker repository definition could not be rendered # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not render the Docker repository definition.
-      Bootstrap will continue without failing the run.
-      Details: {{ apt_repositories_docker_repo_render.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - common_enable_docker
-    - apt_repositories_docker_repo_render is defined
-    - apt_repositories_docker_repo_render.failed | default(false)
+- name: Set up the NodeSource APT repository
+  when: common_enable_dev_tools
   tags:
     - packages
     - system
     - repos
-    - docker
+    - dev-tools
+    - nodejs
+  block:
+    - name: Fetch the NodeSource APT signing key
+      ansible.builtin.get_url:
+        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        dest: /tmp/nodesource-repo.asc
+        mode: "0644"
+        force: true
+
+    - name: Dearmor the NodeSource APT signing key into a binary keyring
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource-repo.asc
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Write the NodeSource repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nodesource.list
+        content: >-
+          {{ (nodesource_repo_parts | join(' ')) ~ '\n' }}
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        nodesource_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/nodesource.gpg]"
+          - "https://deb.nodesource.com/node_{{ nodesource_major_version }}.x"
+          - nodistro
+          - main
+  rescue:
+    - name: Warn when the NodeSource APT repository could not be configured
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not configure the NodeSource APT repository (key fetch, dearmor, or
+          repo file render failed). Node.js package installs may fail later.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
+
+- name: Set up the Warp Terminal APT repository
+  when: common_enable_warp_terminal
+  tags:
+    - packages
+    - system
+    - repos
+    - warp-terminal
+  block:
+    - name: Fetch the Warp Terminal APT signing key
+      ansible.builtin.get_url:
+        url: "{{ warp_terminal_apt_key_url }}"
+        dest: /tmp/warpdotdev.asc
+        mode: "0644"
+        force: true
+
+    - name: Dearmor the Warp Terminal APT signing key into a binary keyring
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          gpg --batch --yes --dearmor -o /etc/apt/keyrings/warpdotdev.gpg /tmp/warpdotdev.asc
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Write the Warp Terminal repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/warpdotdev.list
+        content: >-
+          {{ (warp_repo_parts | join(' ')) ~ '\n' }}
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        warp_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/warpdotdev.gpg]"
+          - https://releases.warp.dev/linux/deb
+          - stable
+          - main
+  rescue:
+    - name: Warn when the Warp Terminal APT repository could not be configured
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not configure the Warp Terminal APT repository (key fetch, dearmor, or
+          repo file render failed). Warp Terminal package installs may fail later.
+          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+          | default('no error message provided') }}
+      changed_when: false
 
 - name: Register the CopyQ PPA repository
   when: common_install_copyq
@@ -290,46 +335,35 @@
         owner: root
         group: root
         mode: "0755"
-      when: common_install_copyq
       tags:
         - packages
         - system
         - repos
 
     - name: Install the CopyQ PPA signing key into a dedicated keyring
-      ansible.builtin.get_url:
-        url: >-
-          https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x407DCF2158B84056D11BBC944F0B2F06AA07D22F
-        dest: /etc/apt/keyrings/hluk-copyq.gpg
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
-      register: apt_repositories_copyq_key_fetch
-      failed_when: false
-      when: common_install_copyq
       tags:
         - packages
         - system
         - repos
         - copyq
-
-    - name: Warn when CopyQ PPA signing key could not be refreshed # noqa: ignore-errors
-      ansible.builtin.fail:
-        msg: >-
-          WARNING: Could not refresh the CopyQ PPA key from keyserver.ubuntu.com.
-          Continuing bootstrap with the currently available keyring file.
-          Details: {{ apt_repositories_copyq_key_fetch.msg | default('no error message provided') }}
-      ignore_errors: true
-      when:
-        - common_install_copyq
-        - apt_repositories_copyq_key_fetch is defined
-        - apt_repositories_copyq_key_fetch.failed | default(false)
-      tags:
-        - packages
-        - system
-        - repos
-        - copyq
+      block:
+        - name: Fetch the CopyQ PPA signing key
+          ansible.builtin.get_url:
+            url: >-
+              https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x407DCF2158B84056D11BBC944F0B2F06AA07D22F
+            dest: /etc/apt/keyrings/hluk-copyq.gpg
+            owner: root
+            group: root
+            mode: "0644"
+            force: true
+      rescue:
+        - name: Warn when CopyQ PPA signing key could not be refreshed
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not refresh the CopyQ PPA key from keyserver.ubuntu.com.
+              Continuing bootstrap with the currently available keyring file.
+              Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+          changed_when: false
 
     - name: Render the CopyQ repository definition
       ansible.builtin.copy:
@@ -344,47 +378,37 @@
           - https://ppa.launchpadcontent.net/hluk/copyq/ubuntu
           - "{{ common_ubuntu_codename }}"
           - main
-      when: common_install_copyq
       tags:
         - repos
         - copyq
-- name: Install the Git Core PPA signing key into a dedicated keyring
-  ansible.builtin.get_url:
-    url: >-
-      https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF911AB184317630C59970973E363C90F8F1B6217
-    dest: /etc/apt/keyrings/git-core-ppa.asc
-    owner: root
-    group: root
-    mode: "0644"
-    force: true
-  register: apt_repositories_git_core_key_fetch
-  failed_when: false
-  when:
-    - ansible_facts['distribution'] in supported_distributions
-    - not common_selective_feature_run or common_enable_git_credential_oauth
-  tags:
-    - packages
-    - system
-    - repos
-    - git
 
-- name: Warn when Git Core PPA signing key could not be refreshed # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: Could not refresh the Git Core PPA key from keyserver.ubuntu.com.
-      Continuing bootstrap with the currently available keyring file.
-      Details: {{ apt_repositories_git_core_key_fetch.msg | default('no error message provided') }}
-  ignore_errors: true
+- name: Install the Git Core PPA signing key into a dedicated keyring
   when:
     - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth
-    - apt_repositories_git_core_key_fetch is defined
-    - apt_repositories_git_core_key_fetch.failed | default(false)
   tags:
     - packages
     - system
     - repos
     - git
+  block:
+    - name: Fetch the Git Core PPA signing key
+      ansible.builtin.get_url:
+        url: >-
+          https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF911AB184317630C59970973E363C90F8F1B6217
+        dest: /etc/apt/keyrings/git-core-ppa.asc
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
+  rescue:
+    - name: Warn when Git Core PPA signing key could not be refreshed
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not refresh the Git Core PPA key from keyserver.ubuntu.com.
+          Continuing bootstrap with the currently available keyring file.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Render the Git Core PPA repository definition
   ansible.builtin.copy:
@@ -410,37 +434,32 @@
     - git
 
 - name: Update apt cache after adding external repositories
-  ansible.builtin.apt:
-    update_cache: true
-  register: apt_repositories_apt_cache_update
-  failed_when: false
   when: >-
     common_enable_vscode
     or common_enable_brave
     or common_enable_docker
     or common_enable_edge
     or common_install_copyq
+    or common_enable_dev_tools
+    or common_enable_warp_terminal
     or (
       ansible_facts['distribution'] in supported_distributions
       and (not common_selective_feature_run or common_enable_git_credential_oauth)
     )
-  changed_when: false
   tags:
     - packages
     - system
     - repos
-
-- name: Warn when apt cache update fails and continue # noqa: ignore-errors
-  ansible.builtin.fail:
-    msg: >-
-      WARNING: apt cache update failed, so package metadata may be stale for this run.
-      Bootstrap will continue.
-      Details: {{ apt_repositories_apt_cache_update.msg | default('no error message provided') }}
-  ignore_errors: true
-  when:
-    - apt_repositories_apt_cache_update is defined
-    - apt_repositories_apt_cache_update.failed | default(false)
-  tags:
-    - packages
-    - system
-    - repos
+  block:
+    - name: Refresh the apt cache
+      ansible.builtin.apt:
+        update_cache: true
+      changed_when: false
+  rescue:
+    - name: Warn when apt cache update fails and continue
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: apt cache update failed, so package metadata may be stale for this run.
+          Bootstrap will continue.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false

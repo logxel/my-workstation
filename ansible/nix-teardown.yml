@@ -1,0 +1,36 @@
+---
+- name: Tear down an existing Home Manager activation
+  hosts: workstation
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Load shared workstation facts
+      ansible.builtin.include_role:
+        name: common
+        apply:
+          tags:
+            - always
+            - facts
+      tags:
+        - always
+        - facts
+
+  tasks:
+    - name: Uninstall Home Manager and reclaim its Nix store footprint
+      ansible.builtin.include_role:
+        name: nix
+        tasks_from: uninstall_home_manager
+        apply:
+          tags:
+            - nix-teardown
+      tags:
+        - nix-teardown
+
+  post_tasks:
+    - name: Notify next steps
+      ansible.builtin.debug:
+        msg: >-
+          Home Manager teardown complete. Re-run `make playbook` (or `ansible-playbook
+          ansible/local.yml`) so the dev_tools, desktop_apps, and shell_config roles
+          provision what Home Manager used to manage.

@@ -192,6 +192,30 @@
             else 'disabled' if common_feature_flags.ai_tools == false
             else common_feature_flags.ai_tools
           }}
+        common_feature_mode_dev_tools: >-
+          {{
+            'enabled' if 'dev_tools' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.dev_tools == true
+            else 'disabled' if common_feature_flags.dev_tools == false
+            else common_feature_flags.dev_tools
+          }}
+        common_feature_mode_warp_terminal: >-
+          {{
+            'enabled' if 'warp_terminal' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.warp_terminal == true
+            else 'disabled' if common_feature_flags.warp_terminal == false
+            else common_feature_flags.warp_terminal
+          }}
+        common_feature_mode_shell_config: >-
+          {{
+            'enabled' if 'shell_config' in common_only_features
+            else 'disabled' if common_only_features | length > 0
+            else 'enabled' if common_feature_flags.shell_config == true
+            else 'disabled' if common_feature_flags.shell_config == false
+            else common_feature_flags.shell_config
+          }}
 
     - name: Ensure feature flag modes are valid
       ansible.builtin.assert:
@@ -214,6 +238,9 @@
           - common_feature_mode_file_manager_integration in ['enabled', 'disabled', 'auto']
           - common_feature_mode_rustup in ['enabled', 'disabled', 'auto']
           - common_feature_mode_ai_tools in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_dev_tools in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_warp_terminal in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_shell_config in ['enabled', 'disabled', 'auto']
         fail_msg: All feature_flags values must be enabled, disabled, or auto.
 
     - name: Ensure the file manager integration mode is valid
@@ -241,7 +268,6 @@
             | default(ansible_facts['distribution_release'], true)
           }}
         common_host_nix_system: "{{ nix_system_map.get(ansible_facts['architecture'], 'x86_64-linux') }}"
-        common_home_manager_activation_link: "{{ local_home }}/.cache/home-manager-activation"
         common_nix_profiles_dir: "{{ local_home }}/.local/state/nix/profiles"
         common_home_manager_profile_path: >-
           {{ local_home }}/.local/state/nix/profiles/{{ nix_home_manager_profile_name }}
@@ -310,6 +336,8 @@
         return_content: true
         status_code: 200
       register: common_gcm_release_api_response
+      check_mode: false
+      when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Resolve Git Credential Manager release version
       ansible.builtin.set_fact:
@@ -323,18 +351,21 @@
             if gcm_version == 'latest'
             else (gcm_version | regex_replace('^v', ''))
           }}
+      when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Ensure Git Credential Manager release version is resolved
       ansible.builtin.assert:
         that:
           - common_gcm_resolved_version | length > 0
         fail_msg: Could not resolve a valid Git Credential Manager release version.
+      when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Derive Git Credential Manager package filename
       ansible.builtin.set_fact:
         common_gcm_package_filename: >-
           gcm-linux-{{ gcm_release_arch_map.get(common_deb_arch, '') }}-{{
           common_gcm_resolved_version }}.deb
+      when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Derive Git Credential Manager release facts
       ansible.builtin.set_fact:
@@ -362,11 +393,7 @@
             )
             | default('')
           }}
-
-    - name: Derive nix flake reference
-      ansible.builtin.set_fact:
-        common_nix_flake_ref: >-
-          {{ dotfiles_repo }}/nix#homeConfigurations.{{ common_host_nix_system }}.activationPackage
+      when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Derive feature enablement facts
       ansible.builtin.set_fact:
@@ -410,6 +437,9 @@
           }}
         common_enable_rustup: "{{ common_feature_mode_rustup != 'disabled' }}"
         common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled' }}"
+        common_enable_dev_tools: "{{ common_feature_mode_dev_tools != 'disabled' }}"
+        common_enable_warp_terminal: "{{ common_feature_mode_warp_terminal != 'disabled' }}"
+        common_enable_shell_config: "{{ common_feature_mode_shell_config != 'disabled' }}"
         common_enable_file_manager_integration: >-
           {{
             common_feature_mode_file_manager_integration == 'enabled'
@@ -423,7 +453,16 @@
             (not common_selective_feature_run)
             or (
               common_only_features
-              | intersect(['vscode', 'brave', 'docker', 'edge', 'copyq', 'git_credential_oauth'])
+              | intersect([
+                'vscode',
+                'brave',
+                'docker',
+                'edge',
+                'copyq',
+                'git_credential_oauth',
+                'dev_tools',
+                'warp_terminal'
+              ])
               | length > 0
             )
           }}
@@ -443,7 +482,8 @@
                 'openvpn',
                 'git_credential_oauth',
                 'firefox',
-                'edge'
+                'edge',
+                'dev_tools'
               ])
               | length > 0
             )
@@ -453,7 +493,7 @@
             (not common_selective_feature_run)
             or (
               common_only_features
-              | intersect(['vscode', 'brave'])
+              | intersect(['vscode', 'brave', 'warp_terminal'])
               | length > 0
             )
           }}
@@ -496,6 +536,16 @@
           {{
             (not common_selective_feature_run)
             or 'ai_tools' in common_only_features
+          }}
+        common_run_role_dev_tools: >-
+          {{
+            (not common_selective_feature_run)
+            or 'dev_tools' in common_only_features
+          }}
+        common_run_role_shell_config: >-
+          {{
+            (not common_selective_feature_run)
+            or 'shell_config' in common_only_features
           }}
         common_apt_desktop_packages: >-
           {{

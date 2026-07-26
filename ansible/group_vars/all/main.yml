@@ -37,6 +37,9 @@ feature_flags_defaults:
   rustup: enabled
   ai_tools: enabled
   file_manager_integration: auto
+  dev_tools: enabled
+  warp_terminal: enabled
+  shell_config: enabled
 clipboard_manager_package_candidates:
   - clip-win
   - ringboard-server
@@ -82,11 +85,14 @@ apt_base_packages:
   - ca-certificates
   - curl
   - desktop-file-utils
+  - direnv
   - git
   - gnupg
   - ripgrep
   - software-properties-common
   - zsh
+  - zsh-autosuggestions
+  - zsh-syntax-highlighting
 distro_desktop_packages:
   Ubuntu:
     - gnome-tweaks
@@ -143,3 +149,14 @@ swap_priority: 500
 nix_install_mode: single-user
 nix_home_manager_profile_name: my-workstation-home-manager
 nix_cleanup_generation_max_age_days: 30
+nodesource_major_version: "24"
+warp_terminal_apt_key_url: https://releases.warp.dev/linux/keys/warp.asc
+oh_my_zsh_theme: robbyrussell
+oh_my_zsh_plugins:
+  - git
+dotfiles_editor_command: "{{ lookup('ansible.builtin.env', 'DOTFILES_EDITOR') | default('code --wait', true) }}"
+workstation_cleanup_downloads_max_age_days: 90
+workstation_cleanup_bun_cache_max_age_days: 30
+workstation_cleanup_cargo_target_max_age_days: 14
+workstation_cleanup_go_build_max_age_days: 14
+workstation_cleanup_go_mod_max_age_days: 30
