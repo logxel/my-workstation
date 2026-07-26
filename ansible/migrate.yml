@@ -37,6 +37,16 @@
       tags:
         - migrate
 
+    - name: Remove legacy Bun compat wrappers for npm/npx/yarn/pnpm
+      ansible.builtin.include_role:
+        name: shell_config
+        tasks_from: cleanup_legacy_bun_wrappers
+        apply:
+          tags:
+            - migrate
+      tags:
+        - migrate
+
   post_tasks:
     - name: Notify next steps
       ansible.builtin.debug:

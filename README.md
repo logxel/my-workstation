@@ -47,7 +47,7 @@ dotfiles/
 2. El script instala `git`, `curl` y `ansible` solo si faltan, clona el repositorio en `~/my-workstation` desde `https://github.com/techlogycs/my-workstation.git` por defecto si hace falta y lanza el playbook local.
 3. El playbook configura APT y, según los flags de `ansible/group_vars/all/main.yml`, instala VS Code, Brave, Docker, virt-manager con libvirt, RustDesk nativo, Warp Terminal, Flatpak en Ubuntu y Pop!_OS, integración con el gestor de archivos y el binario de Nix (solo para `nix shell`/`nix develop`).
 4. El rol `dev_tools` instala bun, uv, dust y Node.js (vía NodeSource); el rol `rustup` provee el toolchain de Rust necesario para compilar dust.
-5. Finalmente, el rol `shell_config` instala Oh My Zsh, plantea `~/.zshrc` (aliases, integración con Nix/direnv, autosuggestions/syntax-highlighting), despliega los wrappers de Bun (`npm`/`npx`/`yarn`/`pnpm`) y activa el timer `workstation-auto-clean`.
+5. Finalmente, el rol `shell_config` instala Oh My Zsh, plantea `~/.zshrc` (aliases, integración con Nix/direnv, autosuggestions/syntax-highlighting) y activa el timer `workstation-auto-clean`. `npm`/`npx` vienen del paquete `nodejs` de NodeSource, sin alias ni wrapper hacia Bun.
 
 ## Roles y tags
 
@@ -63,12 +63,12 @@ El playbook usa roles pequeños y etiquetados para que puedas ejecutar solo una 
 - `file_manager`: integración “Open in Code”.
 - `nix`: instalación del binario de Nix (solo para `nix shell`/`nix develop`, sin Home Manager).
 - `dev_tools`: instala bun, uv, dust (vía cargo) y Node.js (vía NodeSource).
-- `shell_config`: Oh My Zsh, plantilla de `~/.zshrc`, wrappers de Bun y timer `workstation-auto-clean`.
+- `shell_config`: Oh My Zsh, plantilla de `~/.zshrc` y timer `workstation-auto-clean`.
 - `apt-clean`: elimina definiciones legacy de repositorios APT gestionados por el repo, purga paquetes huérfanos y limpia la caché local de APT.
 - `nix-clean`: garbage collection genérico del store de Nix (`make nix-clean`).
 - `nix-migrate-single-user`: desinstala una instalación multiusuario existente de Nix y reprovisiona Nix en modo `single-user`.
 - `nix-teardown`: desinstala una activación previa de Home Manager en hosts que migraron desde la versión anterior de este repo (ver «Migración desde Home Manager»).
-- `migrate`: encadena `nix-teardown` con la limpieza de directorios huérfanos de migraciones internas de este repo (p. ej. el antiguo `CARGO_HOME` personalizado en `~/.local/share/cargo`); idempotente, seguro de correr aunque no aplique nada.
+- `migrate`: encadena `nix-teardown` con la limpieza de artefactos huérfanos de migraciones internas de este repo (el antiguo `CARGO_HOME` personalizado en `~/.local/share/cargo`, los wrappers de Bun para `npm`/`npx`/`yarn`/`pnpm`); idempotente, seguro de correr aunque no aplique nada.
 
 Ejemplos:
 
@@ -214,7 +214,8 @@ Las herramientas de escritorio GNOME se comportan así:
 - Nix usa `nix_install_mode` para controlar cómo se instala en el host. El valor por defecto es `single-user`, que evita crear la batería de usuarios `nixbld*` en estaciones de trabajo donde no hace falta el daemon multiusuario. Si necesitas el modelo clásico con daemon y build users compartidos, cambia `nix_install_mode` a `multi-user`.
 - En modo `multi-user`, el repositorio sigue usando Determinate Systems para simplificar una instalación consistente en Ubuntu/Pop!_OS.
 - Desde que se retiró Home Manager, el rol `nix` solo instala el binario de Nix; no construye ni activa ningún perfil. `nix/flake.nix` únicamente expone `devShells` (nil, nixpkgs-fmt, statix) y los checks de lint — úsalo con `nix develop` para un shell de validación, no para gestionar paquetes de usuario.
-- El rol `shell_config` reemplaza lo que antes hacía Home Manager: instala Oh My Zsh (instalador oficial, modo `--unattended`), plantea `~/.zshrc` desde una plantilla Jinja2 (tema, plugins, autosuggestions/syntax-highlighting vía paquetes APT, alias, variables de sesión y el hook de `direnv`), y despliega los wrappers de Bun (`npm`, `npx`, `yarn`, `pnpm`) en `~/.local/bin`.
+- El rol `shell_config` reemplaza lo que antes hacía Home Manager: instala Oh My Zsh (instalador oficial, modo `--unattended`) y plantea `~/.zshrc` desde una plantilla Jinja2 (tema, plugins, autosuggestions/syntax-highlighting vía paquetes APT, alias, variables de sesión y el hook de `direnv`).
+- `npm`/`npx` no tienen wrapper ni alias hacia Bun: vienen directos del paquete `nodejs` de NodeSource. Se probaron wrappers hacia Bun para `npm`/`npx`/`yarn`/`pnpm`, pero Bun migra `package-lock.json`/`pnpm-lock.yaml`/`yarn.lock` a su propio `bun.lock` de forma unidireccional y sin flag para desactivarlo — sorprendía en proyectos existentes, así que se quitaron.
 - El rol `shell_config` también instala el timer de usuario `workstation-auto-clean` (plantillas `.service`/`.timer` en `~/.config/systemd/user/`), que limpia periódicamente `~/Downloads` y directorios de caché de herramientas (`~/.bun/install/cache`, `~/.cache/cargo-target`, `~/.cache/go-build`, `~/.cache/go/pkg/mod`), y ejecuta `uv cache prune`, `direnv prune` y `nix-collect-garbage --delete-older-than`.
 - `direnv` ahora se instala como paquete APT (antes lo aportaba Home Manager); el hook de Zsh vive en la plantilla de `shell_config`.
 - Si una máquina ya tiene Nix multiusuario y quieres eliminar los usuarios `nixbld*`, usa `ansible/nix-migrate-single-user.yml` o `make nix-migrate-single-user`. Ese flujo desinstala la instalación multiusuario existente con `/nix/nix-installer uninstall --no-confirm` cuando detecta Determinate, o aplica los pasos documentados por upstream para Linux con systemd cuando no hay receipt/uninstaller, y luego vuelve a aprovisionar Nix en modo `single-user`.
@@ -233,11 +234,12 @@ make nix-teardown
 
 Esto: detiene y deshabilita el timer/servicio `workstation-auto-clean` heredado, elimina los wrappers de `~/.local/bin` que aún apunten al store, borra el perfil nombrado de Home Manager y las rutas legacy conocidas, restaura `.zshrc`/`.zshenv` desde su copia `.home-manager-backup` si Ansible la había creado, y finalmente ejecuta `nix-collect-garbage -d` para reclamar el espacio del store. Nix en sí **no** se desinstala — se mantiene para `nix shell`/`nix develop`. Después, vuelve a correr `make playbook` para que `dev_tools`, `desktop_apps` y `shell_config` aprovisionen lo que Home Manager gestionaba antes.
 
+Si el host ya corrió una versión anterior de este mismo repo (no de Home Manager, sino de cambios internos posteriores: el antiguo `CARGO_HOME` personalizado en `~/.local/share/cargo`, o los wrappers de Bun para `npm`/`npx`/`yarn`/`pnpm` en `~/.local/bin`), usa en cambio `make migrate` (`ansible/migrate.yml`) — encadena el teardown de Home Manager con esas limpiezas adicionales, idempotente y seguro de correr sin importar cuáles apliquen.
+
 ## Ajustes que probablemente querrás personalizar
 
 - `DOTFILES_REPO_URL` en `bootstrap.sh` si quieres clonar desde un fork o mirror distinto al repositorio oficial.
 - El tema y los plugins de Oh My Zsh: `oh_my_zsh_theme` y `oh_my_zsh_plugins` en `ansible/group_vars/all/main.yml`.
-- Los wrappers `npm`/`npx`/`yarn`/`pnpm` en `ansible/roles/shell_config/tasks/main.yml` si prefieres mantener los binarios de Node.js sin Bun como compat layer.
 - La política de limpieza en `ansible/roles/shell_config/templates/workstation-auto-clean.sh.j2` y sus variables (`workstation_cleanup_*_max_age_days`, `nix_cleanup_generation_max_age_days`) en `ansible/group_vars/all/main.yml`.
 - `nodesource_major_version` en `ansible/group_vars/all/main.yml` si quieres cambiar la versión mayor de Node.js instalada.
 - `nix_install_mode` en `ansible/group_vars/all/main.yml` si quieres elegir entre `single-user` y `multi-user`. Si una máquina ya tiene Nix multiusuario instalado, el playbook falla de forma explícita cuando pides `single-user` para que no te quedes con los usuarios `nixbld*` pensando que el modo cambió solo.

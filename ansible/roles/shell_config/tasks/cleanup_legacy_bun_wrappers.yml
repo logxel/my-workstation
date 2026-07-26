@@ -1,0 +1,37 @@
+---
+- name: Check which legacy Bun compat wrappers exist
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/{{ item }}"
+  loop:
+    - npm
+    - npx
+    - yarn
+    - pnpm
+  register: shell_config_legacy_wrapper_stat
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - migrate
+
+- name: Remove legacy Bun compat wrappers for npm/npx/yarn/pnpm
+  ansible.builtin.file:
+    path: "{{ local_home }}/.local/bin/{{ item.item }}"
+    state: absent
+  become: true
+  become_user: "{{ local_user }}"
+  loop: "{{ shell_config_legacy_wrapper_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+  tags:
+    - migrate
+
+- name: Report legacy Bun compat wrapper cleanup
+  ansible.builtin.debug:
+    msg: >-
+      Removed legacy Bun compat wrappers ({{ local_home }}/.local/bin/{npm,npx,yarn,pnpm})
+      -- npm/npx now come from the nodejs apt package; yarn/pnpm are no longer aliased.
+  when: shell_config_legacy_wrapper_stat.results | selectattr('stat.exists') | list | length > 0
+  changed_when: false
+  tags:
+    - migrate

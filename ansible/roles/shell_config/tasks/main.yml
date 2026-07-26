@@ -51,34 +51,6 @@
   tags:
     - shell-config
 
-- name: Deploy Bun compat wrappers for npm/yarn/pnpm
-  ansible.builtin.copy:
-    dest: "{{ local_home }}/.local/bin/{{ item }}"
-    content: |
-      #!/usr/bin/env bash
-      exec "$HOME/.bun/bin/bun" "$@"
-    mode: "0755"
-  loop:
-    - npm
-    - yarn
-    - pnpm
-  become: true
-  become_user: "{{ local_user }}"
-  tags:
-    - shell-config
-
-- name: Deploy Bun compat wrapper for npx
-  ansible.builtin.copy:
-    dest: "{{ local_home }}/.local/bin/npx"
-    content: |
-      #!/usr/bin/env bash
-      exec "$HOME/.bun/bin/bunx" "$@"
-    mode: "0755"
-  become: true
-  become_user: "{{ local_user }}"
-  tags:
-    - shell-config
-
 - name: Deploy the workstation-auto-clean script
   ansible.builtin.template:
     src: workstation-auto-clean.sh.j2
