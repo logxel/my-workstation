@@ -25,11 +25,17 @@
             - repos
             - vscode
             - brave
+            - dev-tools
+            - nodejs
+            - warp-terminal
       when: common_run_role_apt_repositories
       tags:
         - repos
         - vscode
         - brave
+        - dev-tools
+        - nodejs
+        - warp-terminal
 
     - name: Manage system packages and shell setup
       ansible.builtin.include_role:

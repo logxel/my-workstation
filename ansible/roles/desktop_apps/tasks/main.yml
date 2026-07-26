@@ -17,6 +17,7 @@
   ansible.builtin.apt:
     name: warp-terminal
     state: present
+    update_cache: true
   when: common_enable_warp_terminal
   tags:
     - applications
