@@ -218,6 +218,23 @@
   tags:
     - nix-teardown
 
+- name: Remove the stale Nix installer line from ~/.profile
+  ansible.builtin.lineinfile:
+    path: "{{ local_home }}/.profile"
+    regexp: '.*added by Nix installer.*'
+    state: absent
+  become: false
+  tags:
+    - nix-teardown
+
+- name: Remove leftover ~/.nix-defexpr (broken channels_root symlink)
+  ansible.builtin.file:
+    path: "{{ local_home }}/.nix-defexpr"
+    state: absent
+  become: false
+  tags:
+    - nix-teardown
+
 - name: Flip the nix feature flag off so future runs stop re-activating Home Manager
   ansible.builtin.debug:
     msg: >-
