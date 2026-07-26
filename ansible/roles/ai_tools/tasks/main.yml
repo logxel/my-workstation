@@ -88,7 +88,6 @@
   register: ai_tools_opencode_post
   become: true
   become_user: "{{ local_user }}"
-  when: not ai_tools_opencode_bin.stat.exists
 
 - name: Fail if OpenCode could not be installed
   ansible.builtin.fail:
