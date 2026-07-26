@@ -6,20 +6,24 @@
 
 ### Architectural Approach
 
-Ansible owns the entire provisioning surface, both system and user layers:
+Ansible owns the entire provisioning surface, system layer and user layer:
 
-* **System Layer (Ansible):** Foundational OS configuration, hardware-specific tuning, core system packages, APT repositories.
-* **User Environment (Ansible):** `dev_tools` (bun, uv, dust, Node.js) and `shell_config` (Oh My Zsh, `~/.zshrc` templating, session vars, the `workstation-auto-clean` timer) roles manage the reproducible user environment. This used to be Nix + Home Manager; that layer was retired (see `ansible/nix-teardown.yml` and the README's "Migración desde Home Manager" section) because splitting package/dotfile ownership across two tools created duplicate installs (e.g. `ripgrep`, `opencode`) and made the user-environment layer opaque to the rest of the Ansible-based tooling.
-* **Nix (retained, narrow scope):** Kept installed only for `nix shell` / `nix develop` ad-hoc dev shells and `direnv` integration. `nix/flake.nix` exposes a `devShell` and lint checks — nothing else. Do not reintroduce `home.nix` or a `homeConfigurations` flake output; new user-environment needs go into an Ansible role, not Nix.
+* **System Layer (Ansible):** Handles the foundational OS configuration, hardware-specific tuning, and core system packages.
+* **User Environment (Ansible):** `dev_tools` (bun, uv, dust, Node.js) and `shell_config` (Oh My Zsh, `~/.zshrc`, session vars, `workstation-auto-clean` timer) manage the reproducible user environment. Nix stays installed, narrow scope only: `nix shell`/`nix develop` + `direnv`. Don't reintroduce `home.nix` or `homeConfigurations` — user-environment needs go into an Ansible role.
 
 ### Core Principles
 
 * **Infrastructure as Code (IaC):** Every system tweak must be versioned and reproducible.
 * **Security by Design:** Integration of DevSecOps best practices into the local workstation environment.
+* **Immutability:** Nix stays scoped to `nix shell`/`nix develop`, where reproducibility still matters; user-space packages/dotfiles are Ansible's job now.
 * **Idempotency:** Ansible playbooks will be designed to be idempotent, ensuring safe re-runs without unintended side effects.
 * **Fact-Driven Configuration:** Ansible playbooks will adapt based on detected hardware and OS facts, ensuring optimal performance and compatibility.
 * **Compaction Justified Do Not Repeat Yourself:** Reuse code when posible to avoid to many same pattern repetitions.
-* **Real failure visibility — use `block`/`rescue`, never `failed_when: false` + a separate `.failed`-checking warn task.** Setting `failed_when: false` on a task permanently overrides its registered result's `.failed` field to `false`, so any later task that checks `<result>.failed` to decide whether to print a warning can never fire — the failure is silently swallowed and the play reports green. This exact bug was found in ~29 places across the repo (including the clip-win → Ringboard migration, which is why it silently failed) and fixed by converting each "try this optional step, warn if it fails, keep going" pattern to `block: / rescue:`, using `ansible_failed_task.name` / `ansible_failed_result.msg` inside `rescue` for the warning message. The only justified exception is a **looped** best-effort task (e.g. installing N Flatpak apps, or disabying M systemd units) where `rescue` would abort the remaining loop iterations on the first failure — there, use `ignore_errors: true` directly on the looped task (with `# noqa: ignore-errors`) instead, since it preserves per-item `.failed` while still letting the loop continue.
+
+### Gotchas
+
+* **`failed_when: false` breaks downstream `.failed` checks.** It force-overrides the registered result's `.failed` to `false`, so a later task checking `<result>.failed` to print a warning can never fire. Use `block:`/`rescue:` instead (`ansible_failed_task.name`, `ansible_failed_result.msg` inside `rescue`). Exception: a **looped** best-effort task, where `rescue` would abort remaining iterations on the first failure — there, use `ignore_errors: true` on the loop task itself (`# noqa: ignore-errors`).
+* **Escape sequences (`\n`, `\t`, `\\`) in a Jinja expression need a double-quoted YAML flow scalar** (`content: "{{ ... ~ '\n' }}"`), never a folded/literal block scalar (`>-`, `|-`) — block scalars are verbatim and don't process backslash escapes.
 
 ### Implementation Strategy
 
