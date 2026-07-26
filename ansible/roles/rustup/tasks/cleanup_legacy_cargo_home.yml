@@ -1,0 +1,30 @@
+---
+- name: Check whether the legacy custom CARGO_HOME directory exists
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/share/cargo"
+  register: rustup_legacy_cargo_home_stat
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - migrate
+
+- name: Remove the legacy custom CARGO_HOME directory
+  ansible.builtin.file:
+    path: "{{ local_home }}/.local/share/cargo"
+    state: absent
+  become: true
+  become_user: "{{ local_user }}"
+  when: rustup_legacy_cargo_home_stat.stat.exists
+  tags:
+    - migrate
+
+- name: Report legacy CARGO_HOME cleanup
+  ansible.builtin.debug:
+    msg: >-
+      Removed the orphaned {{ local_home }}/.local/share/cargo directory
+      (leftover from a custom CARGO_HOME this repo no longer uses; cargo now
+      lives at the standard {{ local_home }}/.cargo).
+  when: rustup_legacy_cargo_home_stat.stat.exists
+  changed_when: false
+  tags:
+    - migrate

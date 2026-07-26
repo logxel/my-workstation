@@ -1,0 +1,46 @@
+---
+- name: Migrate a host to the current Ansible-managed setup
+  hosts: workstation
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Load shared workstation facts
+      ansible.builtin.include_role:
+        name: common
+        apply:
+          tags:
+            - always
+            - facts
+      tags:
+        - always
+        - facts
+
+  tasks:
+    - name: Uninstall Home Manager and reclaim its Nix store footprint
+      ansible.builtin.include_role:
+        name: nix
+        tasks_from: uninstall_home_manager
+        apply:
+          tags:
+            - migrate
+      tags:
+        - migrate
+
+    - name: Remove the legacy custom CARGO_HOME directory
+      ansible.builtin.include_role:
+        name: rustup
+        tasks_from: cleanup_legacy_cargo_home
+        apply:
+          tags:
+            - migrate
+      tags:
+        - migrate
+
+  post_tasks:
+    - name: Notify next steps
+      ansible.builtin.debug:
+        msg: >-
+          Migration cleanup complete. Re-run `make playbook` (or `make bootstrap`)
+          so dev_tools, desktop_apps, and shell_config provision everything on
+          top of the now-clean state.

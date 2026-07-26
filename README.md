@@ -68,6 +68,7 @@ El playbook usa roles pequeños y etiquetados para que puedas ejecutar solo una 
 - `nix-clean`: garbage collection genérico del store de Nix (`make nix-clean`).
 - `nix-migrate-single-user`: desinstala una instalación multiusuario existente de Nix y reprovisiona Nix en modo `single-user`.
 - `nix-teardown`: desinstala una activación previa de Home Manager en hosts que migraron desde la versión anterior de este repo (ver «Migración desde Home Manager»).
+- `migrate`: encadena `nix-teardown` con la limpieza de directorios huérfanos de migraciones internas de este repo (p. ej. el antiguo `CARGO_HOME` personalizado en `~/.local/share/cargo`); idempotente, seguro de correr aunque no aplique nada.
 
 Ejemplos:
 
@@ -79,11 +80,13 @@ ansible-playbook ansible/apt-clean.yml
 ansible-playbook ansible/nix-clean.yml
 ansible-playbook ansible/nix-migrate-single-user.yml
 ansible-playbook ansible/nix-teardown.yml
+ansible-playbook ansible/migrate.yml
 make install-feature features=thunderbird
 make apt-clean
 make nix-clean
 make nix-migrate-single-user
 make nix-teardown
+make migrate
 ./bootstrap.sh --only-feature thunderbird
 ./bootstrap.sh --tags system
 ```
