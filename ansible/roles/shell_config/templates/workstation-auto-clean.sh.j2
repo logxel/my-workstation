@@ -37,3 +37,6 @@ clean_old_files "$HOME/.cache/go/pkg/mod" {{ workstation_cleanup_go_mod_max_age_
 run_if_available uv uv cache prune
 run_if_available direnv direnv prune
 run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ nix_cleanup_generation_max_age_days }}d
+
+# Docker — reclaimable but protect resources used in the last week
+run_if_available docker docker system prune -af --filter until=168h
