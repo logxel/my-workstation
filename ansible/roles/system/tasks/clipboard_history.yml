@@ -92,6 +92,11 @@
         RINGBOARD_REPO: axellpadilla/clipboard-history
         RINGBOARD_BRANCH: "{{ clipboard_history_branch }}"
         PATH: "{{ local_home }}/.cargo/bin:{{ lookup('env', 'PATH') }}"
+        XDG_SESSION_TYPE: "{{ lookup('ansible.builtin.env', 'XDG_SESSION_TYPE') }}"
+        XDG_CURRENT_DESKTOP: "{{ lookup('ansible.builtin.env', 'XDG_CURRENT_DESKTOP') }}"
+        DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+        XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
       become: false
       changed_when: true
   rescue:
