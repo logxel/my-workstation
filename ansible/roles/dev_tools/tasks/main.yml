@@ -53,7 +53,7 @@
 
 - name: Check whether dust is already installed
   ansible.builtin.stat:
-    path: "{{ local_home }}/.local/share/cargo/bin/dust"
+    path: "{{ local_home }}/.cargo/bin/dust"
   register: dev_tools_dust_bin
   become: true
   become_user: "{{ local_user }}"
@@ -65,13 +65,10 @@
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
-      {{ local_home }}/.local/share/cargo/bin/cargo install du-dust
+      {{ local_home }}/.cargo/bin/cargo install du-dust
     executable: /bin/bash
   become: true
   become_user: "{{ local_user }}"
-  environment:
-    CARGO_HOME: "{{ local_home }}/.local/share/cargo"
-    RUSTUP_HOME: "{{ local_home }}/.rustup"
   when:
     - not dev_tools_dust_bin.stat.exists
     - common_enable_rustup
