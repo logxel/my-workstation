@@ -256,8 +256,7 @@
     - name: Write the NodeSource repository definition
       ansible.builtin.copy:
         dest: /etc/apt/sources.list.d/nodesource.list
-        content: >-
-          {{ (nodesource_repo_parts | join(' ')) ~ '\n' }}
+        content: "{{ (nodesource_repo_parts | join(' ')) ~ '\n' }}"
         owner: root
         group: root
         mode: "0644"
@@ -303,8 +302,7 @@
     - name: Write the Warp Terminal repository definition
       ansible.builtin.copy:
         dest: /etc/apt/sources.list.d/warpdotdev.list
-        content: >-
-          {{ (warp_repo_parts | join(' ')) ~ '\n' }}
+        content: "{{ (warp_repo_parts | join(' ')) ~ '\n' }}"
         owner: root
         group: root
         mode: "0644"
