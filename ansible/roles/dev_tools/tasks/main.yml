@@ -69,6 +69,9 @@
     executable: /bin/bash
   become: true
   become_user: "{{ local_user }}"
+  environment:
+    CARGO_HOME: "{{ local_home }}/.cargo"
+    RUSTUP_HOME: "{{ local_home }}/.rustup"
   when:
     - not dev_tools_dust_bin.stat.exists
     - common_enable_rustup

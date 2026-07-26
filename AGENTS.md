@@ -24,6 +24,7 @@ Ansible owns the entire provisioning surface, system layer and user layer:
 
 * **`failed_when: false` breaks downstream `.failed` checks.** It force-overrides the registered result's `.failed` to `false`, so a later task checking `<result>.failed` to print a warning can never fire. Use `block:`/`rescue:` instead (`ansible_failed_task.name`, `ansible_failed_result.msg` inside `rescue`). Exception: a **looped** best-effort task, where `rescue` would abort remaining iterations on the first failure — there, use `ignore_errors: true` on the loop task itself (`# noqa: ignore-errors`).
 * **Escape sequences (`\n`, `\t`, `\\`) in a Jinja expression need a double-quoted YAML flow scalar** (`content: "{{ ... ~ '\n' }}"`), never a folded/literal block scalar (`>-`, `|-`) — block scalars are verbatim and don't process backslash escapes.
+* **`ansible_connection: local` inherits the caller's ambient shell environment.** A task that doesn't explicitly set an env var (e.g. `CARGO_HOME`) can silently pick up whatever value is exported in the shell that ran `ansible-playbook`/`make bootstrap` — not just the OS default. Any task whose install-location env var this repo has ever changed the value of must set that var explicitly in its own `environment:` block, not rely on "unset = correct default".
 
 ### Implementation Strategy
 

@@ -28,5 +28,8 @@
     creates: "{{ local_home }}/.cargo/bin/cargo"
   become: true
   become_user: "{{ local_user }}"
+  environment:
+    CARGO_HOME: "{{ local_home }}/.cargo"
+    RUSTUP_HOME: "{{ local_home }}/.rustup"
   when: not rustup_cargo_bin.stat.exists
   changed_when: true
