@@ -41,6 +41,19 @@
   tags:
     - shell-config
 
+- name: Deploy sudoers drop-in for workstation auto-clean
+  ansible.builtin.template:
+    src: sudoers-cleanup.j2
+    dest: "/etc/sudoers.d/workstation-cleanup"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  become: true
+  tags:
+    - shell-config
+    - cleanup-timer
+
 - name: Ensure ~/.local/bin exists
   ansible.builtin.file:
     path: "{{ local_home }}/.local/bin"

@@ -40,3 +40,7 @@ run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ 
 
 # Docker — reclaimable but protect resources used in the last week
 run_if_available docker docker system prune -af --filter until=168h
+# Flatpak -- clean unused runtimes from system installation (needs sudo)
+run_if_available flatpak sudo flatpak uninstall --unused --noninteractive
+# Systemd journal -- limit size on disk
+run_if_available journalctl sudo journalctl --vacuum-size=500M

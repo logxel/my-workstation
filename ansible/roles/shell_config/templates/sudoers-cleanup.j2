@@ -1,0 +1,4 @@
+# {{ ansible_managed | default('Managed by Ansible (roles/shell_config) -- local edits will be overwritten.') }}
+# Workstation auto-clean: narrow sudo access for periodic cleanup tasks
+{{ local_user }} ALL=(root) NOPASSWD: /usr/bin/journalctl --vacuum-size=*
+{{ local_user }} ALL=(root) NOPASSWD: /usr/bin/flatpak uninstall --unused --noninteractive
