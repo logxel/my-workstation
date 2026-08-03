@@ -96,8 +96,14 @@ apt_base_packages:
 distro_desktop_packages:
   Ubuntu:
     - gnome-tweaks
+    - remmina
+    - remmina-plugin-rdp
+    - remmina-plugin-secret
   Pop!_OS:
     - gnome-tweaks
+    - remmina
+    - remmina-plugin-rdp
+    - remmina-plugin-secret
 distro_flatpak_apps:
   Ubuntu:
     - org.gimp.GIMP

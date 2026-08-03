@@ -126,6 +126,32 @@
     - applications
     - vscode
 
+- name: Check whether Remmina is still installed as a user Flatpak
+  ansible.builtin.command:
+    cmd: flatpak info --user org.remmina.Remmina
+  become: true
+  become_user: "{{ local_user }}"
+  register: desktop_apps_remmina_flatpak_info
+  changed_when: false
+  failed_when: false
+  when: "'flatpak' in ansible_facts.packages"
+  tags:
+    - applications
+    - remmina
+
+- name: Remove the user Remmina Flatpak after migrating to the native package
+  ansible.builtin.command:
+    cmd: flatpak uninstall --user --noninteractive org.remmina.Remmina
+  become: true
+  become_user: "{{ local_user }}"
+  changed_when: desktop_apps_remmina_flatpak_info.rc == 0
+  when:
+    - "'flatpak' in ansible_facts.packages"
+    - desktop_apps_remmina_flatpak_info.rc == 0
+  tags:
+    - applications
+    - remmina
+
 - name: Ensure RustDesk native packages are available for this architecture
   ansible.builtin.assert:
     that:
