@@ -150,7 +150,7 @@ Los componentes opcionales están controlados desde `ansible/group_vars/all/main
 - Los repositorios APT gestionados directamente por este repo para Microsoft, Docker y git-core usan keyrings dedicados bajo `/etc/apt/keyrings`, y el flujo `apt-clean` borra definiciones legacy conocidas para evitar entradas duplicadas o avisos por `trusted.gpg` en `apt`.
 - `apt_base_packages` incluye `ripgrep` (antes también se instalaba por duplicado vía Home Manager; ahora `rg` viene solo de APT).
 - `distro_flatpak_apps` define las aplicaciones de escritorio vía Flatpak por distro, excluyendo RustDesk porque se instala de forma nativa.
-- `rustdesk_version` fija la versión de RustDesk que se descarga como paquete `.deb`.
+- `rustdesk_version` acepta `latest` (por defecto) o una versión fija; el paquete `.deb` se resuelve desde los metadatos de GitHub y se verifica su SHA-256 antes de instalar.
 - `rustdesk_release_arch_map` traduce la arquitectura Debian detectada al sufijo usado por los artefactos oficiales de RustDesk.
 - `supported_distributions`, `deb_arch_map` y `nix_system_map` convierten facts de Ansible en valores utilizables para APT y Nix en Ubuntu y Pop!_OS, incluyendo hosts ARM64.
 - `clipboard_manager_package_candidates` define qué paquetes cuentan como gestor de portapapeles existente a efectos del modo `auto` de clipboard-history y CopyQ.
@@ -244,7 +244,7 @@ Si el host ya corrió una versión anterior de este mismo repo (no de Home Manag
 - `nodesource_major_version` en `ansible/group_vars/all/main.yml` si quieres cambiar la versión mayor de Node.js instalada.
 - `nix_install_mode` en `ansible/group_vars/all/main.yml` si quieres elegir entre `single-user` y `multi-user`. Si una máquina ya tiene Nix multiusuario instalado, el playbook falla de forma explícita cuando pides `single-user` para que no te quedes con los usuarios `nixbld*` pensando que el modo cambió solo.
 - `DOTFILES_EDITOR` si desactivas VS Code y quieres que `EDITOR` y `VISUAL` apunten a otro binario.
-- `rustdesk_version` en `ansible/group_vars/all/main.yml` si quieres fijar otra release oficial de RustDesk.
+- `rustdesk_version` en `ansible/group_vars/all/main.yml` si quieres fijar una release específica de RustDesk en lugar de `latest`.
 - `feature_flags.virt_manager`, `virt_manager_packages` y `virt_manager_default_uri` si quieres ajustar el stack de virtualización local.
 - Los `feature_flags`, `distro_flatpak_apps` y el modo de integración del gestor de archivos en `ansible/group_vars/all/main.yml`.
 - `feature_flags.openvpn`, `openvpn_core_packages` y `openvpn_network_manager_packages` si quieres ajustar cuándo se instala el backend de OpenVPN y evitar dependencias de NetworkManager cuando no hagan falta.

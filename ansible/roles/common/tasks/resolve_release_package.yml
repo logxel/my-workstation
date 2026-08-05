@@ -1,0 +1,107 @@
+---
+# Generic GitHub release resolver used to install Debian packages from a
+# pinned-or-latest upstream release (Git Credential Manager, RustDesk).
+#
+# Supplied at include time:
+#   release_pkg_repo:              GitHub "org/repo" (e.g. rustdesk/rustdesk).
+#   release_pkg_version:           "latest" or a pinned release version.
+#   release_pkg_tag_prefix:        "v" when upstream tags are prefixed (GCM), "" otherwise.
+#   release_pkg_arch:              Upstream architecture suffix used in asset names.
+#   release_pkg_filename_pattern:  Asset filename template with {VERSION} and {ARCH} placeholders.
+#   release_pkg_best_effort:       True to warn-and-skip on failure; False to fail the run.
+#
+# Sets these host facts for the caller to consume right after the include:
+#   common_release_pkg_resolved_version, common_release_pkg_package_filename,
+#   common_release_pkg_release_arch, common_release_pkg_deb_checksum,
+#   common_release_pkg_deb_url.
+# On best-effort failure all of them are reset to empty strings.
+
+- name: Resolve the release package metadata for {{ release_pkg_repo }}
+  block:
+    - name: Fetch the release metadata from the GitHub API for {{ release_pkg_repo }}
+      ansible.builtin.uri:
+        url: >-
+          {{
+            'https://api.github.com/repos/' ~ release_pkg_repo ~ '/releases/latest'
+            if release_pkg_version == 'latest'
+            else 'https://api.github.com/repos/' ~ release_pkg_repo ~ '/releases/tags/'
+              ~ release_pkg_tag_prefix ~ (release_pkg_version | regex_replace('^v', ''))
+          }}
+        method: GET
+        return_content: true
+        status_code: 200
+      register: common_release_pkg_api_response
+      check_mode: false
+
+    - name: Resolve the release version for {{ release_pkg_repo }}
+      ansible.builtin.set_fact:
+        common_release_pkg_resolved_version: >-
+          {{
+            (
+              common_release_pkg_api_response.json.tag_name
+              | default('')
+              | regex_replace('^v', '')
+            )
+            if release_pkg_version == 'latest'
+            else (release_pkg_version | regex_replace('^v', ''))
+          }}
+
+    - name: Derive the package filename for {{ release_pkg_repo }}
+      ansible.builtin.set_fact:
+        common_release_pkg_package_filename: >-
+          {{
+            release_pkg_filename_pattern
+            | replace('{VERSION}', common_release_pkg_resolved_version)
+            | replace('{ARCH}', release_pkg_arch)
+          }}
+
+    - name: Derive the release facts for {{ release_pkg_repo }}
+      ansible.builtin.set_fact:
+        common_release_pkg_release_arch: "{{ release_pkg_arch }}"
+        common_release_pkg_deb_checksum: >-
+          {{
+            (
+              common_release_pkg_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_release_pkg_package_filename)
+              | map(attribute='digest')
+              | first
+            )
+            | default('')
+          }}
+        common_release_pkg_deb_url: >-
+          {{
+            (
+              common_release_pkg_api_response.json.assets
+              | default([])
+              | selectattr('name', 'equalto', common_release_pkg_package_filename)
+              | map(attribute='browser_download_url')
+              | first
+            )
+            | default('')
+          }}
+  rescue:
+    - name: Fail when the release metadata cannot be resolved for {{ release_pkg_repo }}
+      ansible.builtin.fail:
+        msg: >-
+          Could not resolve the {{ release_pkg_repo }} release version from the GitHub API.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      when: not release_pkg_best_effort
+
+    - name: Warn when the release metadata could not be resolved for {{ release_pkg_repo }}
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not resolve the {{ release_pkg_repo }} release version from the GitHub API.
+          Bootstrap will skip this optional feature.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
+      when: release_pkg_best_effort
+
+    - name: Reset the release facts when metadata resolution fails for {{ release_pkg_repo }}
+      ansible.builtin.set_fact:
+        common_release_pkg_resolved_version: ""
+        common_release_pkg_package_filename: ""
+        common_release_pkg_release_arch: ""
+        common_release_pkg_deb_checksum: ""
+        common_release_pkg_deb_url: ""
+      when: release_pkg_best_effort

@@ -325,76 +325,43 @@
           }}
         common_is_pop_desktop_host: "{{ ansible_facts['distribution'] == 'Pop!_OS' }}"
 
-    - name: Fetch Git Credential Manager release metadata
-      ansible.builtin.uri:
-        url: >-
-          {{
-            'https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/latest'
-            if gcm_version == 'latest'
-            else 'https://api.github.com/repos/git-ecosystem/git-credential-manager/releases/tags/v'
-              ~ (gcm_version | regex_replace('^v', ''))
-          }}
-        method: GET
-        return_content: true
-        status_code: 200
-      register: common_gcm_release_api_response
-      check_mode: false
+    - name: Resolve the Git Credential Manager release metadata
+      ansible.builtin.import_tasks: resolve_release_package.yml
+      vars:
+        release_pkg_repo: git-ecosystem/git-credential-manager
+        release_pkg_version: "{{ gcm_version }}"
+        release_pkg_tag_prefix: v
+        release_pkg_arch: "{{ gcm_release_arch_map.get(common_deb_arch, '') }}"
+        release_pkg_filename_pattern: "gcm-linux-{ARCH}-{VERSION}.deb"
+        release_pkg_best_effort: false
+      tags:
+        - packages
+        - system
+        - git
       when: common_feature_mode_git_credential_oauth != 'disabled'
 
-    - name: Resolve Git Credential Manager release version
+    - name: Derive the Git Credential Manager release facts
       ansible.builtin.set_fact:
-        common_gcm_resolved_version: >-
-          {{
-            (
-              common_gcm_release_api_response.json.tag_name
-              | default('')
-              | regex_replace('^v', '')
-            )
-            if gcm_version == 'latest'
-            else (gcm_version | regex_replace('^v', ''))
-          }}
+        common_gcm_resolved_version: "{{ common_release_pkg_resolved_version }}"
+        common_gcm_package_filename: "{{ common_release_pkg_package_filename }}"
+        common_gcm_release_arch: "{{ common_release_pkg_release_arch }}"
+        common_gcm_deb_checksum: "{{ common_release_pkg_deb_checksum }}"
+        common_gcm_deb_url: "{{ common_release_pkg_deb_url }}"
+      tags:
+        - packages
+        - system
+        - git
       when: common_feature_mode_git_credential_oauth != 'disabled'
 
-    - name: Ensure Git Credential Manager release version is resolved
+    - name: Ensure the Git Credential Manager release version is resolved
       ansible.builtin.assert:
         that:
           - common_gcm_resolved_version | length > 0
         fail_msg: Could not resolve a valid Git Credential Manager release version.
-      when: common_feature_mode_git_credential_oauth != 'disabled'
-
-    - name: Derive Git Credential Manager package filename
-      ansible.builtin.set_fact:
-        common_gcm_package_filename: >-
-          gcm-linux-{{ gcm_release_arch_map.get(common_deb_arch, '') }}-{{
-          common_gcm_resolved_version }}.deb
-      when: common_feature_mode_git_credential_oauth != 'disabled'
-
-    - name: Derive Git Credential Manager release facts
-      ansible.builtin.set_fact:
-        common_gcm_release_arch: >-
-          {{ gcm_release_arch_map.get(common_deb_arch, '') }}
-        common_gcm_deb_checksum: >-
-          {{
-            (
-              common_gcm_release_api_response.json.assets
-              | default([])
-              | selectattr('name', 'equalto', common_gcm_package_filename)
-              | map(attribute='digest')
-              | first
-            )
-            | default('')
-          }}
-        common_gcm_deb_url: >-
-          {{
-            (
-              common_gcm_release_api_response.json.assets
-              | default([])
-              | selectattr('name', 'equalto', common_gcm_package_filename)
-              | map(attribute='browser_download_url')
-              | first
-            )
-            | default('')
-          }}
+      tags:
+        - packages
+        - system
+        - git
       when: common_feature_mode_git_credential_oauth != 'disabled'
 
     - name: Derive feature enablement facts
@@ -601,6 +568,32 @@
               ) == 0
             )
           }}
+
+    - name: Resolve the RustDesk release metadata
+      ansible.builtin.import_tasks: resolve_release_package.yml
+      vars:
+        release_pkg_repo: rustdesk/rustdesk
+        release_pkg_version: "{{ rustdesk_version }}"
+        release_pkg_tag_prefix: ""
+        release_pkg_arch: "{{ rustdesk_release_arch_map.get(common_deb_arch, '') }}"
+        release_pkg_filename_pattern: "rustdesk-{VERSION}-{ARCH}.deb"
+        release_pkg_best_effort: true
+      tags:
+        - applications
+        - rustdesk
+      when: common_run_role_desktop_apps
+
+    - name: Derive the RustDesk release facts
+      ansible.builtin.set_fact:
+        common_rustdesk_resolved_version: "{{ common_release_pkg_resolved_version }}"
+        common_rustdesk_package_filename: "{{ common_release_pkg_package_filename }}"
+        common_rustdesk_release_arch: "{{ common_release_pkg_release_arch }}"
+        common_rustdesk_deb_checksum: "{{ common_release_pkg_deb_checksum }}"
+        common_rustdesk_deb_url: "{{ common_release_pkg_deb_url }}"
+      tags:
+        - applications
+        - rustdesk
+      when: common_run_role_desktop_apps
 
     - name: Derive dependent feature facts
       ansible.builtin.set_fact:

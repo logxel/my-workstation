@@ -119,7 +119,8 @@ distro_flatpak_apps:
     - com.spotify.Client
     - com.valvesoftware.Steam
     - org.videolan.VLC
-rustdesk_version: "1.4.6"
+# Set to a pinned version or "latest" to resolve release URL and SHA-256 from GitHub metadata.
+rustdesk_version: "latest"
 # Branch/tag of axellpadilla/clipboard-history to install from.
 clipboard_history_branch: "patched"
 rustdesk_release_arch_map:

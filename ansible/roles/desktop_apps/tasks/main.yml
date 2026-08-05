@@ -152,75 +152,49 @@
     - applications
     - remmina
 
-- name: Ensure RustDesk native packages are available for this architecture
-  ansible.builtin.assert:
-    that:
-      - common_deb_arch in rustdesk_release_arch_map
-    fail_msg: RustDesk publishes native Debian packages only for amd64 and arm64.
-  tags:
-    - applications
-    - rustdesk
-
-- name: Check whether RustDesk is still installed as a system Flatpak
-  ansible.builtin.command:
-    cmd: flatpak info --system com.rustdesk.RustDesk
-  register: desktop_apps_rustdesk_flatpak_info
-  changed_when: false
-  failed_when: false
-  when: "'flatpak' in ansible_facts.packages"
-  tags:
-    - applications
-    - rustdesk
-
-- name: Remove the system RustDesk Flatpak before installing the native package
-  ansible.builtin.command:
-    cmd: flatpak uninstall --system --noninteractive com.rustdesk.RustDesk
-  changed_when: desktop_apps_rustdesk_flatpak_info.rc == 0
-  when:
-    - "'flatpak' in ansible_facts.packages"
-    - desktop_apps_rustdesk_flatpak_info.rc == 0
-  tags:
-    - applications
-    - rustdesk
-
-- name: Download the pinned RustDesk Debian package
+- name: Install RustDesk from the resolved upstream release
+  when: common_rustdesk_resolved_version | length > 0
   tags:
     - applications
     - rustdesk
   block:
-    - name: Fetch the pinned RustDesk Debian package
+    - name: Ensure RustDesk native packages are available for this architecture
+      ansible.builtin.assert:
+        that:
+          - common_rustdesk_release_arch | length > 0
+          - common_rustdesk_deb_url | length > 0
+          - common_rustdesk_deb_checksum | length > 0
+        fail_msg: RustDesk publishes native Debian packages only for amd64 and arm64.
+
+    - name: Check whether RustDesk is still installed as a system Flatpak
+      ansible.builtin.command:
+        cmd: flatpak info --system com.rustdesk.RustDesk
+      register: desktop_apps_rustdesk_flatpak_info
+      changed_when: false
+      failed_when: false
+      when: "'flatpak' in ansible_facts.packages"
+
+    - name: Remove the system RustDesk Flatpak before installing the native package
+      ansible.builtin.command:
+        cmd: flatpak uninstall --system --noninteractive com.rustdesk.RustDesk
+      changed_when: desktop_apps_rustdesk_flatpak_info.rc == 0
+      when:
+        - "'flatpak' in ansible_facts.packages"
+        - desktop_apps_rustdesk_flatpak_info.rc == 0
+
+    - name: Download the resolved RustDesk Debian package
       ansible.builtin.get_url:
-        url: >-
-          https://github.com/rustdesk/rustdesk/releases/download/{{ rustdesk_version
-          }}/{{ rustdesk_package_filename }}
-        dest: /tmp/{{ rustdesk_package_filename }}
+        url: "{{ common_rustdesk_deb_url }}"
+        dest: "/tmp/{{ common_rustdesk_package_filename }}"
         mode: "0644"
         force: false
-      vars:
-        rustdesk_package_filename: >-
-          rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
-  rescue:
-    - name: Warn when RustDesk package download fails
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not download the RustDesk Debian package.
-          Bootstrap will continue without failing this optional feature.
-          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-      changed_when: false
+        checksum: "{{ common_rustdesk_deb_checksum if common_rustdesk_deb_checksum | length > 0 else omit }}"
 
-- name: Install RustDesk and start its system service
-  tags:
-    - applications
-    - rustdesk
-  block:
-    - name: Install RustDesk from the pinned upstream Debian package
+    - name: Install RustDesk from the resolved upstream Debian package
       ansible.builtin.apt:
-        deb: /tmp/{{ rustdesk_package_filename }}
+        deb: "/tmp/{{ common_rustdesk_package_filename }}"
         state: present
         update_cache: true
-      vars:
-        rustdesk_package_filename: >-
-          rustdesk-{{ rustdesk_version }}-{{ rustdesk_release_arch_map[common_deb_arch] }}.deb
 
     - name: Ensure the RustDesk system service is enabled and started
       ansible.builtin.systemd:
@@ -237,3 +211,14 @@
           Failed step: {{ ansible_failed_task.name }}.
           Details: {{ ansible_failed_result.msg | default('no error message provided') }}
       changed_when: false
+
+- name: Warn when the RustDesk release could not be resolved
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: Could not resolve the RustDesk release version from the GitHub API.
+      Skipping the optional RustDesk feature.
+  when: not (common_rustdesk_resolved_version | default('') | length > 0)
+  changed_when: false
+  tags:
+    - applications
+    - rustdesk
