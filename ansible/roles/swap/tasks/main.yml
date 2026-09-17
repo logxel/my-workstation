@@ -1,4 +1,83 @@
 ---
+# Shared discovery prelude: runs regardless of feature state so both the
+# enable and disable branches operate on the same, verified view of swap.
+# Only active file swaps or regular files carrying a swap signature may ever
+# be removed. Partition/disk swap entries are intentionally never touched.
+- name: Discover swap state
+  tags:
+    - swap
+  block:
+    - name: Read active swap entries from proc
+      ansible.builtin.command:
+        cmd: cat /proc/swaps
+      register: swap_proc
+      changed_when: false
+
+    - name: Read fstab contents
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: swap_fstab
+
+    - name: Identify active file swaps and fstab swap paths
+      ansible.builtin.set_fact:
+        swap_active_files: "{{ swap_proc.stdout_lines[1:]
+          | select('search', '\\sfile\\s')
+          | map('split')
+          | map('first')
+          | list }}"
+        swap_fstab_files: "{{ (swap_fstab.content | b64decode).splitlines()
+          | map('regex_replace', '^\\s*#\\s*', '')
+          | map('trim')
+          | reject('equalto', '')
+          | select('search', '^\\S+\\s+\\S+\\s+swap\\s')
+          | map('split')
+          | map('first')
+          | select('match', '^/')
+          | reject('match', '^/dev/')
+          | list
+          | unique }}"
+
+    - name: Build swap candidate list
+      ansible.builtin.set_fact:
+        swap_candidates: "{{ (swap_active_files + swap_fstab_files) | unique | list }}"
+
+    - name: Stat swap candidates
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ swap_candidates }}"
+      register: swap_candidates_stat
+
+    - name: Select inactive regular-file candidates
+      ansible.builtin.set_fact:
+        swap_inactive_regular: "{{ swap_candidates_stat.results
+          | default([])
+          | selectattr('stat.exists')
+          | selectattr('stat.isreg')
+          | map(attribute='item')
+          | list
+          | difference(swap_active_files) }}"
+
+    - name: Probe inactive swap candidates for swap signature
+      ansible.builtin.command:
+        cmd: blkid -p -o value -s TYPE "{{ item }}"
+      loop: "{{ swap_inactive_regular }}"
+      register: swap_probe
+      changed_when: false
+      ignore_errors: true  # noqa: ignore-errors
+
+    - name: Collect signature-verified swap files
+      ansible.builtin.set_fact:
+        swap_sig_files: "{{ swap_probe.results
+          | default([])
+          | selectattr('stdout', 'defined')
+          | selectattr('stdout', 'search', '^swap')
+          | map(attribute='item')
+          | list }}"
+
+    - name: Compute verified swap removal set
+      ansible.builtin.set_fact:
+        swap_verified_removals: "{{ (swap_active_files + swap_sig_files) | unique | list }}"
+
 - name: Calculate swap file size from available RAM
   when: common_enable_swap | default(false)
   tags:
@@ -6,13 +85,10 @@
   block:
     - name: Derive swap ratio from total RAM
       ansible.builtin.set_fact:
-        swap_ratio: >-
-          {{
-            2.0 if (ansible_facts['memtotal_mb'] < 8192)
-            else 1.5 if (ansible_facts['memtotal_mb'] < 16384)
-            else 0.75 if (ansible_facts['memtotal_mb'] < 32768)
-            else 0.5
-          }}
+        swap_ratio: "{{ 2.0 if (ansible_facts['memtotal_mb'] < 8192)
+          else 1.5 if (ansible_facts['memtotal_mb'] < 16384)
+          else 0.75 if (ansible_facts['memtotal_mb'] < 32768)
+          else 0.5 }}"
 
     - name: Derive swap file size in MiB
       ansible.builtin.set_fact:
@@ -40,43 +116,29 @@
   tags:
     - swap
   block:
-    - name: Derive alternate swap file path
-      ansible.builtin.set_fact:
-        swap_path_alt: >-
-          {{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}
-
-    - name: Get list of active swaps
-      ansible.builtin.command: cat /proc/swaps
-      register: swap_teardown_active
-      changed_when: false
-      failed_when: false
-
-    - name: Deactivate all swap files
+    - name: Deactivate verified swap files
       ansible.builtin.command:
         cmd: swapoff "{{ item }}"
-      loop:
-        - "{{ swap_file_path }}"
-        - "{{ swap_path_alt }}"
-      when: item in swap_teardown_active.stdout
+      loop: "{{ swap_verified_removals }}"
+      when: item in swap_active_files
       changed_when: true
 
-    - name: Remove swap files
+    - name: Remove verified swap files
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop:
-        - "{{ swap_file_path }}"
-        - "{{ swap_path_alt }}"
+      loop: "{{ swap_verified_removals }}"
 
-    - name: Comment out all swap entries in fstab
-      ansible.builtin.replace:
+    - name: Remove verified swap entries from fstab
+      ansible.builtin.lineinfile:
         path: /etc/fstab
-        regexp: "^([^#].*\\s+swap\\s+.*)$"
-        replace: "# \\1"
+        regexp: '^\s*#?\s*{{ item | regex_escape }}\s+'
+        state: absent
+      loop: "{{ swap_verified_removals }}"
 
     - name: Confirm teardown
       ansible.builtin.debug:
-        msg: "Swap disabled — removed swap files and fstab entries"
+        msg: "Swap disabled — removed verified swap files and their fstab entries"
 
 - name: Setup swap file when feature is enabled
   when: common_enable_swap | default(false)
@@ -85,15 +147,9 @@
   block:
     - name: Derive alternate swap file path
       ansible.builtin.set_fact:
-        swap_path_alt: >-
-          {{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}
+        swap_path_alt: "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
 
-    - name: Get list of active swaps
-      ansible.builtin.command: cat /proc/swaps
-      register: swap_active_list
-      changed_when: false
-
-    - name: Stat known swap file paths
+    - name: Stat managed swap file paths
       ansible.builtin.stat:
         path: "{{ item }}"
       register: swap_paths_stat
@@ -101,24 +157,17 @@
         - "{{ swap_file_path }}"
         - "{{ swap_path_alt }}"
 
-    - name: Determine current active swap and its size
+    - name: Determine current active managed swap
       ansible.builtin.set_fact:
-        swap_current: >-
-          {{
-            swap_file_path if (swap_paths_stat.results[0].stat.exists
-              and swap_file_path in swap_active_list.stdout)
-            else swap_path_alt if (swap_paths_stat.results[1].stat.exists
-              and swap_path_alt in swap_active_list.stdout)
-            else None
-          }}
-        swap_current_size: >-
-          {{
-            swap_paths_stat.results[0].stat.size if (swap_paths_stat.results[0].stat.exists
-              and swap_file_path in swap_active_list.stdout)
-            else swap_paths_stat.results[1].stat.size if (swap_paths_stat.results[1].stat.exists
-              and swap_path_alt in swap_active_list.stdout)
-            else 0
-          }}
+        swap_current: "{{ swap_file_path if (swap_file_path in swap_active_files)
+          else swap_path_alt if (swap_path_alt in swap_active_files)
+          else none }}"
+
+    - name: Determine current active managed swap size
+      ansible.builtin.set_fact:
+        swap_current_size: "{{ swap_paths_stat.results[0].stat.size if swap_current == swap_file_path
+          else swap_paths_stat.results[1].stat.size if swap_current == swap_path_alt
+          else 0 }}"
 
     - name: Determine next swap path for rotation
       ansible.builtin.set_fact:
@@ -126,72 +175,87 @@
 
     - name: Check if current swap needs migration
       ansible.builtin.set_fact:
-        swap_needs_migration: >-
-          {{
-            swap_current == None
-            or ((swap_current_size | int - swap_size_mb | int * 1024 * 1024) | abs >= 1048576)
-          }}
+        swap_needs_migration: "{{ swap_current is none
+          or (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576 }}"
+
+    - name: Derive final swap target
+      ansible.builtin.set_fact:
+        swap_final: "{{ swap_next if swap_needs_migration else swap_current }}"
+
+    - name: Compute managed swap removals
+      ansible.builtin.set_fact:
+        swap_removals: "{{ swap_verified_removals | reject('equalto', swap_final) | list }}"
 
     - name: Report swap state
       ansible.builtin.debug:
         msg:
           - "Active: {{ swap_current | default('none') }} ({{ swap_current_size }} bytes)"
           - "Desired: {{ swap_size_mb }} MiB ({{ swap_size_mb | int * 1024 * 1024 }} bytes)"
-          - "Next: {{ swap_next }}"
+          - "Final: {{ swap_final }}"
+          - "Removals: {{ swap_removals }}"
           - "Migration needed: {{ swap_needs_migration }}"
 
     - name: Migrate swap with zero-downtime rotation
       when: swap_needs_migration
       block:
-        - name: Remove stale file at alternate path
+        - name: Remove stale file at new swap path
           ansible.builtin.file:
             path: "{{ swap_next }}"
             state: absent
-          when: swap_paths_stat.results[0 if swap_next == swap_file_path else 1].stat.exists
+          when: swap_next not in swap_active_files
 
         - name: Create new swap file
           ansible.builtin.command:
             cmd: fallocate -l "{{ swap_size_mb }}M" "{{ swap_next }}"
+          when: swap_next not in swap_active_files
           changed_when: true
 
         - name: Set secure permissions
           ansible.builtin.file:
             path: "{{ swap_next }}"
             mode: "0600"
+          when: swap_next not in swap_active_files
 
         - name: Format as swap
-          ansible.builtin.command: mkswap "{{ swap_next }}"
+          ansible.builtin.command:
+            cmd: mkswap "{{ swap_next }}"
+          when: swap_next not in swap_active_files
           changed_when: true
 
         - name: Activate new swap (old stays active)
-          ansible.builtin.command: swapon -p "{{ swap_priority }}" "{{ swap_next }}"
+          ansible.builtin.command:
+            cmd: swapon -p "{{ swap_priority }}" "{{ swap_next }}"
+          when: swap_next not in swap_active_files
           changed_when: true
 
-        - name: Deactivate old swap
-          ansible.builtin.command: swapoff "{{ swap_current }}"
-          when: swap_current != None
-          failed_when: false
-          changed_when: true
+    # The replacement is created/formatted/activated before the old swap is
+    # swapped off, so the machine always has headroom. A failed swapoff must
+    # abort before any file removal: unlinking a still-active swap discards
+    # live pages.
+    - name: Deactivate obsolete swap files
+      ansible.builtin.command:
+        cmd: swapoff "{{ item }}"
+      loop: "{{ swap_removals }}"
+      when: item in swap_active_files
+      changed_when: true
 
-        - name: Remove old swap file
-          ansible.builtin.file:
-            path: "{{ swap_current }}"
-            state: absent
-          when: swap_current != None
+    - name: Remove obsolete swap files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ swap_removals }}"
 
-        - name: Update current swap reference
-          ansible.builtin.set_fact:
-            swap_current: "{{ swap_next }}"
-
-    - name: Comment out all swap entries in fstab
-      ansible.builtin.replace:
+    - name: Remove obsolete swap entries from fstab
+      ansible.builtin.lineinfile:
         path: /etc/fstab
-        regexp: "^([^#].*\\s+swap\\s+.*)$"
-        replace: "# \\1"
+        regexp: '^\s*#?\s*{{ item | regex_escape }}\s+'
+        state: absent
+      loop: "{{ swap_removals }}"
 
     - name: Ensure correct swap entry in fstab
       ansible.builtin.lineinfile:
         path: /etc/fstab
-        regexp: "^{{ swap_current | regex_escape }}\\s+"
-        line: "{{ swap_current }} none swap sw,pri={{ swap_priority }} 0 0"
+        regexp: '^\s*#?\s*{{ swap_final | regex_escape }}\s+'
+        line: "{{ swap_final }} none swap sw,pri={{ swap_priority }} 0 0"
         state: present
+        backup: true
