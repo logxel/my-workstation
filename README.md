@@ -44,7 +44,7 @@ dotfiles/
 ## Flujo recomendado
 
 1. En el host Pop!_OS o Ubuntu real, ejecuta `./bootstrap.sh`.
-2. El script instala `git`, `curl` y `ansible` solo si faltan, clona el repositorio en `~/my-workstation` desde `https://github.com/techlogycs/my-workstation.git` por defecto si hace falta y lanza el playbook local.
+2. El script instala `git`, `curl` y `ansible` solo si faltan, clona el repositorio en `~/my-workstation` desde `https://github.com/logxel/my-workstation.git` por defecto si hace falta y lanza el playbook local.
 3. El playbook configura APT y, según los flags de `ansible/group_vars/all/main.yml`, instala VS Code, Brave, Docker, virt-manager con libvirt, RustDesk nativo, Warp Terminal, Flatpak en Ubuntu y Pop!_OS, integración con el gestor de archivos y el binario de Nix (solo para `nix shell`/`nix develop`).
 4. El rol `dev_tools` instala bun, uv, dust y Node.js (vía NodeSource); el rol `rustup` provee el toolchain de Rust necesario para compilar dust.
 5. Finalmente, el rol `shell_config` instala Oh My Zsh, plantea `~/.zshrc` (aliases, integración con Nix/direnv, autosuggestions/syntax-highlighting) y activa el timer `workstation-auto-clean`. `npm`/`npx` vienen del paquete `nodejs` de NodeSource, sin alias ni wrapper hacia Bun.

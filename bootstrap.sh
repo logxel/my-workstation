@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # the idempotent Ansible playbook.
 
 REPO_DIR="${HOME}/my-workstation"
-DEFAULT_REPO_URL="https://github.com/techlogycs/my-workstation.git"
+DEFAULT_REPO_URL="https://github.com/logxel/my-workstation.git"
 REPO_URL="${DOTFILES_REPO_URL:-${DEFAULT_REPO_URL}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ONLY_FEATURES=""
