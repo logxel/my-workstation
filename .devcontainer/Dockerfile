@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+FROM mcr.microsoft.com/devcontainers/base:ubuntu26.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -13,7 +13,7 @@ RUN apt-get update \
 			python3-pip \
 			xz-utils \
 		&& python3 -m pip install --break-system-packages --no-cache-dir \
-			ansible-core \
+			'ansible-core>=2.21' \
 			ansible-lint \
 			yamllint \
 		&& apt-get clean \
