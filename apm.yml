@@ -1,4 +1,3 @@
----
 name: my-workstation
 version: 1.0.0
 description: APM project for my-workstation
@@ -9,8 +8,7 @@ author: Axell Padilla
 targets:
   - opencode
 dependencies:
-  apm:
-    - mubaidr/gem-team
+  apm: []
   mcp: []
 includes: auto
 scripts: {}
