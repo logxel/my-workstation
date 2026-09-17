@@ -1,13 +1,7 @@
 ---
-- name: Remove legacy VS Code source file with Signed-By keyring
-  ansible.builtin.file:
-    path: /etc/apt/sources.list.d/vscode.sources
-    state: absent
-  when: common_enable_vscode
-  tags:
-    - repos
-    - vscode
-
+# Each legacy one-line .list removal below MUST carry the exact same tag list
+# as its corresponding render task in main.yml, so that a tag-scoped run can
+# never remove a legacy definition without (re)writing its deb822 replacement.
 - name: Remove legacy Microsoft Edge source file
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/microsoft-edge.list
@@ -17,23 +11,87 @@
     - repos
     - edge
 
-- name: Remove legacy Brave source file with Signed-By keyring
+- name: Remove legacy VS Code .list definition
   ansible.builtin.file:
-    path: /etc/apt/sources.list.d/brave-browser-release.sources
+    path: /etc/apt/sources.list.d/vscode.list
     state: absent
+  when: common_enable_vscode
+  tags:
+    - repos
+    - vscode
+
+- name: Remove legacy Microsoft Edge stable .list definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/microsoft-edge-stable.list
+    state: absent
+  when: common_enable_edge
+  tags:
+    - packages
+    - system
+    - repos
+    - edge
+
+- name: Remove legacy Brave .list definition and stale keyring
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/brave-browser-release.list
+    - /usr/share/keyrings/brave-browser-archive-keyring.gpg
   when: common_enable_brave
   tags:
     - repos
     - brave
 
-- name: Remove legacy Docker source file with Signed-By keyring
+- name: Remove legacy Docker .list definition and stale keyring
   ansible.builtin.file:
-    path: /etc/apt/sources.list.d/docker.sources
+    path: "{{ item }}"
     state: absent
+  loop:
+    - /etc/apt/sources.list.d/docker.list
+    - /usr/share/keyrings/docker-archive-keyring.gpg
   when: common_enable_docker
   tags:
+    - packages
+    - system
     - repos
     - docker
+
+- name: Remove legacy NodeSource .list definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/nodesource.list
+    state: absent
+  when: common_enable_dev_tools
+  tags:
+    - packages
+    - system
+    - repos
+    - dev-tools
+    - nodejs
+
+- name: Remove legacy Warp Terminal .list definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/warpdotdev.list
+    state: absent
+  when: common_enable_warp_terminal
+  tags:
+    - packages
+    - system
+    - repos
+    - warp-terminal
+
+- name: Remove legacy Git Core PPA .list definition
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/git-core-ppa.list
+    state: absent
+  when:
+    - ansible_facts['distribution'] in supported_distributions
+    - not common_selective_feature_run or common_enable_git_credential_oauth
+  tags:
+    - packages
+    - system
+    - repos
+    - git
 
 - name: Remove legacy CopyQ PPA artifacts
   ansible.builtin.file:

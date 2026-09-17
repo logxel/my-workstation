@@ -2,11 +2,18 @@
 - name: Remove obsolete managed APT source definitions
   ansible.builtin.include_tasks: cleanup.yml
   tags:
+    - packages
+    - system
     - repos
     - vscode
     - edge
     - brave
     - docker
+    - dev-tools
+    - nodejs
+    - warp-terminal
+    - git
+    - copyq
 
 - name: Ensure the APT keyrings directory exists
   ansible.builtin.file:
@@ -59,71 +66,34 @@
       changed_when: false
 
 - name: Render the VS Code repository definition
+  ansible.builtin.include_tasks: render_source.yml
+  vars:
+    apt_source_name: vscode
+    apt_source_uris: https://packages.microsoft.com/repos/code
+    apt_source_suites: stable
+    apt_source_components: main
+    apt_source_arch: "{{ common_deb_arch }}"
+    apt_source_keyring: /etc/apt/keyrings/microsoft.asc
   when: common_enable_vscode
   tags:
     - repos
     - vscode
-  block:
-    - name: Write the VS Code repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/vscode.list
-        content: "{{ (vscode_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
-      vars:
-        vscode_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
-          - https://packages.microsoft.com/repos/code
-          - stable
-          - main
-  rescue:
-    - name: Warn when VS Code repository definition could not be rendered
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not render the VS Code repository definition.
-          Bootstrap will continue without failing the run.
-          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-      changed_when: false
 
 - name: Render the Microsoft Edge repository definition
+  ansible.builtin.include_tasks: render_source.yml
+  vars:
+    apt_source_name: microsoft-edge-stable
+    apt_source_uris: https://packages.microsoft.com/repos/edge
+    apt_source_suites: stable
+    apt_source_components: main
+    apt_source_arch: "{{ common_deb_arch }}"
+    apt_source_keyring: /etc/apt/keyrings/microsoft.asc
   when: common_enable_edge
   tags:
     - packages
     - system
     - repos
     - edge
-  block:
-    - name: Write the Microsoft Edge repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/microsoft-edge-stable.list
-        content: "{{ (edge_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
-      vars:
-        edge_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]"
-          - https://packages.microsoft.com/repos/edge
-          - stable
-          - main
-  rescue:
-    - name: Warn when Microsoft Edge repository definition could not be rendered
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not render the Microsoft Edge repository definition.
-          Bootstrap will continue without failing the run.
-          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-      changed_when: false
-
-- name: Remove legacy Brave source file with Signed-By keyring
-  ansible.builtin.file:
-    path: /etc/apt/sources.list.d/brave-browser-release.sources
-    state: absent
-  when: common_enable_brave
-  tags:
-    - repos
-    - brave
 
 - name: Install the Brave APT signing key into a dedicated keyring
   when: common_enable_brave
@@ -149,41 +119,18 @@
       changed_when: false
 
 - name: Register the Brave repository
+  ansible.builtin.include_tasks: render_source.yml
+  vars:
+    apt_source_name: brave-browser-release
+    apt_source_uris: https://brave-browser-apt-release.s3.brave.com/
+    apt_source_suites: stable
+    apt_source_components: main
+    apt_source_arch: "{{ common_deb_arch }}"
+    apt_source_keyring: /etc/apt/keyrings/brave-browser-archive-keyring.gpg
   when: common_enable_brave
   tags:
     - repos
     - brave
-  block:
-    - name: Write the Brave repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/brave-browser-release.list
-        content: "{{ (brave_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
-      vars:
-        brave_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/brave-browser-archive-keyring.gpg]"
-          - https://brave-browser-apt-release.s3.brave.com/
-          - stable
-          - main
-  rescue:
-    - name: Warn when Brave repository registration fails
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not register the Brave repository.
-          Bootstrap will continue without failing the run.
-          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-      changed_when: false
-
-- name: Remove legacy Docker source file with Signed-By keyring
-  ansible.builtin.file:
-    path: /etc/apt/sources.list.d/docker.sources
-    state: absent
-  when: common_enable_docker
-  tags:
-    - repos
-    - docker
 
 - name: Install the Docker APT signing key into a dedicated keyring
   when: common_enable_docker
@@ -211,34 +158,20 @@
       changed_when: false
 
 - name: Render the Docker repository definition
+  ansible.builtin.include_tasks: render_source.yml
+  vars:
+    apt_source_name: docker
+    apt_source_uris: https://download.docker.com/linux/ubuntu
+    apt_source_suites: "{{ common_ubuntu_codename }}"
+    apt_source_components: stable
+    apt_source_arch: "{{ common_deb_arch }}"
+    apt_source_keyring: /etc/apt/keyrings/docker.asc
   when: common_enable_docker
   tags:
     - packages
     - system
     - repos
     - docker
-  block:
-    - name: Write the Docker repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/docker.list
-        content: "{{ (docker_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
-      vars:
-        docker_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/docker.asc]"
-          - https://download.docker.com/linux/ubuntu
-          - "{{ common_ubuntu_codename }}"
-          - stable
-  rescue:
-    - name: Warn when Docker repository definition could not be rendered
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not render the Docker repository definition.
-          Bootstrap will continue without failing the run.
-          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-      changed_when: false
 
 - name: Set up the NodeSource APT repository
   when: common_enable_dev_tools
@@ -264,19 +197,15 @@
         executable: /bin/bash
       changed_when: true
 
-    - name: Write the NodeSource repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/nodesource.list
-        content: "{{ (nodesource_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
+    - name: Render the NodeSource repository definition
+      ansible.builtin.include_tasks: render_source.yml
       vars:
-        nodesource_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/nodesource.gpg]"
-          - "https://deb.nodesource.com/node_{{ nodesource_major_version }}.x"
-          - nodistro
-          - main
+        apt_source_name: nodesource
+        apt_source_uris: "https://deb.nodesource.com/node_{{ nodesource_major_version }}.x"
+        apt_source_suites: nodistro
+        apt_source_components: main
+        apt_source_arch: "{{ common_deb_arch }}"
+        apt_source_keyring: /etc/apt/keyrings/nodesource.gpg
   rescue:
     - name: Warn when the NodeSource APT repository could not be configured
       ansible.builtin.debug:
@@ -310,19 +239,15 @@
         executable: /bin/bash
       changed_when: true
 
-    - name: Write the Warp Terminal repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/warpdotdev.list
-        content: "{{ (warp_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
+    - name: Render the Warp Terminal repository definition
+      ansible.builtin.include_tasks: render_source.yml
       vars:
-        warp_repo_parts:
-          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/warpdotdev.gpg]"
-          - https://releases.warp.dev/linux/deb
-          - stable
-          - main
+        apt_source_name: warpdotdev
+        apt_source_uris: https://releases.warp.dev/linux/deb
+        apt_source_suites: stable
+        apt_source_components: main
+        apt_source_arch: "{{ common_deb_arch }}"
+        apt_source_keyring: /etc/apt/keyrings/warpdotdev.gpg
   rescue:
     - name: Warn when the Warp Terminal APT repository could not be configured
       ansible.builtin.debug:
@@ -362,19 +287,13 @@
       changed_when: false
 
 - name: Render the Git Core PPA repository definition
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/git-core-ppa.list
-    content: "{{ (git_core_ppa_repo_parts | join(' ')) ~ '\n' }}"
-    owner: root
-    group: root
-    mode: "0644"
+  ansible.builtin.include_tasks: render_source.yml
   vars:
-    git_core_ppa_repo_parts:
-      - deb
-      - "[signed-by=/etc/apt/keyrings/git-core-ppa.asc]"
-      - https://ppa.launchpadcontent.net/git-core/ppa/ubuntu
-      - "{{ common_ubuntu_codename }}"
-      - main
+    apt_source_name: git-core-ppa
+    apt_source_uris: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu
+    apt_source_suites: "{{ common_ubuntu_codename }}"
+    apt_source_components: main
+    apt_source_keyring: /etc/apt/keyrings/git-core-ppa.asc
   when:
     - ansible_facts['distribution'] in supported_distributions
     - not common_selective_feature_run or common_enable_git_credential_oauth

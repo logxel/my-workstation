@@ -1,0 +1,40 @@
+---
+# Reusable deb822 source renderer.
+#
+# Callers pass (via include_tasks vars):
+#   apt_source_name       - file stem, e.g. "vscode" -> vscode.sources
+#   apt_source_uris       - URI (no "deb" keyword)
+#   apt_source_suites     - suite/codename/Release
+#   apt_source_components - component list
+#   apt_source_arch       - optional; when omitted no "Architectures:" line is written
+#   apt_source_keyring    - Signed-By keyring file PATH (never an inline key block)
+- name: Render the APT repository definition for {{ apt_source_name }}
+  block:
+    - name: Write the repository definition for {{ apt_source_name }}
+      ansible.builtin.copy:
+        dest: "/etc/apt/sources.list.d/{{ apt_source_name }}.sources"
+        content: "{{ (apt_source_deb822_lines | reject('equalto', '') | join('\n')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        # A blank list item is produced when the optional Architectures line is
+        # omitted; reject() drops it so no empty continuation line is written.
+        apt_source_deb822_lines:
+          - "Types: deb"
+          - "URIs: {{ apt_source_uris }}"
+          - "Suites: {{ apt_source_suites }}"
+          - "Components: {{ apt_source_components }}"
+          - >-
+            {{ ('Architectures: ' ~ apt_source_arch)
+               if apt_source_arch is defined and apt_source_arch | length > 0
+               else '' }}
+          - "Signed-By: {{ apt_source_keyring }}"
+  rescue:
+    - name: Warn when the repository definition could not be rendered for {{ apt_source_name }}
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Could not render the {{ apt_source_name }} repository definition.
+          Bootstrap will continue without failing the run.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
