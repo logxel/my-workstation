@@ -149,6 +149,23 @@ docker_daemon_config:
     gc:
       enabled: true
       defaultKeepStorage: 20GB
+# Docker image store. The default keeps today's classic overlay2 image store
+# (DockerRootDir /var/lib/docker) and changes nothing. Set to "containerd" to
+# switch to the containerd image store, which `docker info` reports as the
+# "overlayfs" storage driver and keeps images under /var/lib/containerd.
+# Rollback: set this back to "overlay2" and re-run; the containerd-snapshotter
+# feature flag is removed and the old overlay2 data stays on disk until
+# docker_prune_old_image_store is explicitly enabled.
+docker_image_store: overlay2
+# Seconds that "docker stop" waits for each running container before SIGKILL
+# when the image store switch stops the workloads. The 10s Docker default can
+# cut a stateful service (for example MongoDB/WiredTiger) checkpoint short, so
+# this is generous on purpose.
+docker_image_store_stop_timeout: 60
+# Irreversible: delete the leftover overlay2 data once the containerd image
+# store is active. It is only honoured with docker_image_store: containerd and
+# when no overlay2 layers are still mounted.
+docker_prune_old_image_store: false
 docker_desktop_cleanup_approved: false
 vscode_file_manager_integration: auto
 swap_file_path: /swapfile

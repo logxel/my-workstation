@@ -1,4 +1,16 @@
 ---
+- name: Reject an unsupported Docker image store
+  ansible.builtin.assert:
+    that:
+      - docker_image_store in ['overlay2', 'containerd']
+    fail_msg: >-
+      docker_image_store must be 'overlay2' (classic image store, the default) or
+      'containerd' (containerd image store, reported as the overlayfs storage driver);
+      got '{{ docker_image_store }}'.
+  when: common_enable_docker | default(false)
+  tags:
+    - docker
+
 - name: Check whether the user Docker config exists
   become: true
   become_user: "{{ local_user }}"
@@ -112,14 +124,61 @@
     - name: Ignore an unreadable or invalid Docker daemon configuration
       ansible.builtin.set_fact:
         docker_daemon_existing_config: {}
+
+# Guards the requested image store before daemon.json is written: the daemon and
+# driver checks, the space requirement and the old build-cache flush all happen
+# here so a doomed migration fails before any half-migrated configuration lands.
+- name: Guard the Docker image store before the daemon configuration is written
+  ansible.builtin.import_tasks: image_store.yml
+  vars:
+    docker_image_store_phase: pre
+  when: common_enable_docker | default(false)
+  tags:
+    - docker
+
 - name: Compose the effective Docker daemon configuration
   ansible.builtin.set_fact:
     docker_daemon_effective_config: >-
       {{
-        (docker_daemon_existing_config | default({}))
-        | combine(docker_daemon_config, recursive=True)
+        (
+          (docker_daemon_existing_config | default({}))
+          | combine(docker_daemon_config_with_image_store | default(docker_daemon_config), recursive=True)
+        )
+        | combine(docker_image_store_rollback_override | default({}), recursive=False)
       }}
   when: common_enable_docker | default(false)
+  tags:
+    - docker
+
+# Normalization of the composed fact only (the daemon.json writer stays unique):
+# after a rollback the feature override empties `features`, so drop the leftover
+# empty object to leave the classic overlay2 file exactly as it was before.
+- name: Drop an emptied Docker daemon feature set after a rollback
+  ansible.builtin.set_fact:
+    docker_daemon_effective_config: >-
+      {{
+        docker_daemon_effective_config | dict2items
+        | rejectattr('key', 'eq', 'features')
+        | items2dict
+      }}
+  when:
+    - common_enable_docker | default(false)
+    - docker_daemon_effective_config.features is defined
+    - docker_daemon_effective_config.features | length == 0
+  tags:
+    - docker
+
+# Keep the immediate pre-write file so a config dockerd rejects can be restored
+# without a manual rollback. Idempotent: an identical copy reports no change.
+- name: Back up the current Docker daemon configuration before writing
+  ansible.builtin.copy:
+    src: /etc/docker/daemon.json
+    dest: /etc/docker/daemon.json.image-store.bak
+    remote_src: true
+    mode: "0644"
+  when:
+    - common_enable_docker | default(false)
+    - docker_daemon_file.stat.exists
   tags:
     - docker
 
@@ -128,10 +187,48 @@
     dest: /etc/docker/daemon.json
     content: "{{ docker_daemon_effective_config | to_nice_json }}"
     mode: "0644"
+  register: docker_daemon_write
   notify: Restart Docker
   when: common_enable_docker | default(false)
   tags:
     - docker
+
+# Validate the generated file before the restart can apply it; on rejection
+# restore the backup (or drop the generated file when there was none) and fail.
+- name: Validate the written Docker daemon configuration
+  when:
+    - common_enable_docker | default(false)
+    - docker_daemon_write is changed
+  tags:
+    - docker
+  block:
+    - name: Validate the generated Docker daemon configuration
+      ansible.builtin.command:
+        cmd: dockerd --validate --config-file /etc/docker/daemon.json
+      register: docker_daemon_validate
+      changed_when: false
+  rescue:
+    - name: Restore the backed-up Docker daemon configuration
+      ansible.builtin.copy:
+        src: /etc/docker/daemon.json.image-store.bak
+        dest: /etc/docker/daemon.json
+        remote_src: true
+        mode: "0644"
+      when: docker_daemon_file.stat.exists | default(false)
+
+    - name: Remove the generated Docker daemon configuration when there was no backup
+      ansible.builtin.file:
+        path: /etc/docker/daemon.json
+        state: absent
+      when: not (docker_daemon_file.stat.exists | default(false))
+
+    - name: Stop when the generated Docker daemon configuration is rejected
+      ansible.builtin.fail:
+        msg: >-
+          dockerd rejected the generated /etc/docker/daemon.json
+          ({{ ansible_failed_result.msg | default('no output') }}). The previous
+          configuration was restored and the image store switch was not applied;
+          fix the configuration and re-run the playbook.
 
 - name: Ensure the docker group exists
   ansible.builtin.group:
@@ -155,6 +252,22 @@
     name: docker
     enabled: true
     state: started
+  when: common_enable_docker | default(false)
+  tags:
+    - docker
+
+# Apply the pending "Restart Docker" handler now so the image store can be
+# verified against the daemon that is actually running the new daemon.json.
+- name: Apply the pending Docker daemon restart before verification
+  ansible.builtin.meta: flush_handlers
+  when: common_enable_docker | default(false)
+  tags:
+    - docker
+
+- name: Verify the Docker image store after the daemon restart
+  ansible.builtin.import_tasks: image_store.yml
+  vars:
+    docker_image_store_phase: post
   when: common_enable_docker | default(false)
   tags:
     - docker

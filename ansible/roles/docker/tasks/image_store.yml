@@ -1,0 +1,507 @@
+---
+# Docker image store migration between the classic overlay2 store and the
+# containerd image store (reported by `docker info` as the overlayfs driver).
+#
+# This file is imported twice from main.yml and selects its phase with the
+# docker_image_store_phase variable:
+#   pre  - runs BEFORE daemon.json is written: validate, guard, record the
+#          pre-switch state, stop the workloads and flush the old build cache.
+#          All guards fail here, before any half-migration is written.
+#   post - runs AFTER the daemon has been restarted: verify the driver and the
+#          volume set, warn about containers/images that need a redeploy and,
+#          only when explicitly requested, delete the leftover overlay2 data.
+#
+# Rollback: set docker_image_store: overlay2 and re-run the playbook. The
+# containerd-snapshotter feature flag is removed from daemon.json, the daemon is
+# restarted onto the classic store and the old overlay2 data is still on disk
+# because it is only deleted when docker_prune_old_image_store is true.
+#
+# Image store paths follow the daemon's DockerRootDir (data-root), falling back
+# to /var/lib/docker when the daemon is down.
+
+- name: Evaluate the Docker image store before the daemon configuration is written
+  when: docker_image_store_phase | default('pre') == 'pre'
+  block:
+    # Pin every docker CLI call to the local daemon so an ambient DOCKER_HOST or
+    # DOCKER_CONTEXT inherited by `ansible_connection: local` cannot make these
+    # guards inspect a different daemon than the one whose daemon.json we write.
+    - name: Pin the Docker CLI to the local daemon socket
+      ansible.builtin.set_fact:
+        docker_cli_environment:
+          DOCKER_HOST: "unix:///var/run/docker.sock"
+
+    - name: Compose the Docker daemon configuration with the requested image store feature
+      ansible.builtin.set_fact:
+        docker_daemon_config_with_image_store: >-
+          {{
+            docker_daemon_config
+            | combine({'features': {'containerd-snapshotter': true}}, recursive=True)
+            if docker_image_store == 'containerd'
+            else docker_daemon_config
+          }}
+
+    # When rolling back to overlay2 the feature key must be ABSENT, and a
+    # recursive merge cannot delete a key. This override carries the final
+    # feature set and is combined non-recursively at the top level, replacing
+    # `features` wholesale while preserving any other feature keys.
+    - name: Compose the override that drops the containerd snapshotter on rollback
+      ansible.builtin.set_fact:
+        docker_image_store_rollback_override: >-
+          {{
+            {'features': (
+              (
+                (docker_daemon_existing_config.features | default({}))
+                | combine(docker_daemon_config.features | default({}), recursive=True)
+              )
+              | dict2items
+              | rejectattr('key', 'eq', 'containerd-snapshotter')
+              | items2dict
+            )}
+            if (
+              docker_image_store == 'overlay2'
+              and 'containerd-snapshotter' in (docker_daemon_existing_config.features | default({}))
+            )
+            else {}
+          }}
+
+    - name: Detect the current Docker storage driver
+      block:
+        - name: Read Docker daemon information as JSON
+          ansible.builtin.command:
+            cmd: docker info --format json
+          environment: "{{ docker_cli_environment }}"
+          register: docker_info_raw
+          changed_when: false
+
+        - name: Expose the current Docker storage driver and data root
+          ansible.builtin.set_fact:
+            docker_current_driver: "{{ (docker_info_raw.stdout | from_json).Driver }}"
+            docker_root_dir: >-
+              {{ (docker_info_raw.stdout | from_json).DockerRootDir | default('/var/lib/docker') }}
+            docker_image_store_daemon_up: true
+      rescue:
+        - name: Warn that image store guards are skipped while the daemon is down
+          ansible.builtin.debug:
+            msg: >-
+              The Docker daemon did not answer 'docker info'; the image store guard
+              checks cannot run. The daemon is started later in this role.
+        - name: Mark the Docker daemon as unavailable for image store guards
+          ansible.builtin.set_fact:
+            docker_current_driver: ""
+            docker_root_dir: /var/lib/docker
+            docker_image_store_daemon_up: false
+        # A containerd switch or a destructive prune without a responsive daemon
+        # is exactly the unguarded, unverified migration we must refuse: the
+        # driver, the free space and the container/volume set cannot be checked.
+        # The plain overlay2 default has nothing to migrate and skips cleanly.
+        - name: Stop when a guarded image store change is requested without a daemon
+          ansible.builtin.fail:
+            msg: >-
+              The Docker daemon is not responding, so the image store guards (storage
+              driver, free space) and the container/volume verification cannot run.
+              docker_image_store: containerd and docker_prune_old_image_store both
+              require a responsive daemon: start Docker and re-run the playbook.
+          when: >-
+            (docker_image_store == 'containerd')
+            or (docker_prune_old_image_store | bool)
+
+    - name: Map the requested image store to its reported storage driver
+      ansible.builtin.set_fact:
+        docker_image_store_target_driver: "{{ 'overlay2' if docker_image_store == 'overlay2' else 'overlayfs' }}"
+
+    - name: Decide whether the image store must change
+      ansible.builtin.set_fact:
+        docker_image_store_switch: >-
+          {{
+            (docker_image_store_daemon_up | default(false) | bool)
+            and (docker_current_driver | default('')) != docker_image_store_target_driver
+          }}
+
+    - name: Report when the requested image store is already active
+      ansible.builtin.debug:
+        msg: >-
+          Docker already uses the '{{ docker_image_store }}' image store
+          (storage driver '{{ docker_current_driver }}'); nothing to change.
+      when:
+        - docker_image_store_daemon_up | default(false) | bool
+        - not (docker_image_store_switch | bool)
+
+    - name: Reject an untested Docker storage driver
+      ansible.builtin.fail:
+        msg: >-
+          The Docker storage driver is '{{ docker_current_driver }}', which is
+          neither overlay2 nor overlayfs. Switching image stores is only tested
+          from overlay2 (classic) and overlayfs (containerd image store).
+      when:
+        - docker_image_store_daemon_up | default(false) | bool
+        - docker_current_driver not in ['overlay2', 'overlayfs']
+
+    # Only create the directory when it is missing: an existing /var/lib/containerd
+    # is 0700 today and must not be chmod-ed to 0711 just because we looked at it.
+    - name: Check whether the containerd image store directory exists
+      ansible.builtin.stat:
+        path: /var/lib/containerd
+      register: docker_containerd_store_dir
+      when: docker_image_store == 'containerd'
+
+    - name: Create the containerd image store directory only when missing
+      ansible.builtin.file:
+        path: /var/lib/containerd
+        state: directory
+        mode: "0711"
+      when:
+        - docker_image_store == 'containerd'
+        - not (docker_containerd_store_dir.stat.exists | default(false))
+
+    # Read-only inventory, captured before anything is stopped or changed.
+    - name: Inspect the containers that exist before switching image stores
+      ansible.builtin.command:
+        cmd: docker ps -a --format json
+      environment: "{{ docker_cli_environment }}"
+      register: docker_ps_before_raw
+      changed_when: false
+      when: docker_image_store_switch | bool
+
+    # Docker always emits the Labels/Names/State fields, so attribute access is
+    # safe here. Compose projects come from the com.docker.compose.project label;
+    # the rest are standalone containers to recreate by hand.
+    - name: Record the Compose projects that will need a redeploy
+      ansible.builtin.set_fact:
+        docker_pre_switch_compose_projects: >-
+          {{
+            docker_ps_before_raw.stdout_lines | default([])
+            | map('from_json')
+            | map(attribute='Labels', default='')
+            | map('regex_findall', 'com\.docker\.compose\.project=([^,]+)')
+            | flatten
+            | unique
+            | sort
+          }}
+      when: docker_image_store_switch | bool
+
+    - name: Record the standalone containers that will need a redeploy
+      ansible.builtin.set_fact:
+        docker_pre_switch_standalone_containers: >-
+          {{
+            docker_ps_before_raw.stdout_lines | default([])
+            | map('from_json')
+            | rejectattr('Labels', 'search', 'com\.docker\.compose\.project=')
+            | map(attribute='Names')
+            | list
+          }}
+      when: docker_image_store_switch | bool
+
+    - name: Record the running containers that will be stopped for the switch
+      ansible.builtin.set_fact:
+        docker_pre_switch_running_containers: >-
+          {{
+            docker_ps_before_raw.stdout_lines | default([])
+            | map('from_json')
+            | selectattr('State', 'eq', 'running')
+            | map(attribute='Names')
+            | list
+          }}
+      when: docker_image_store_switch | bool
+
+    - name: Read the Docker volumes before switching image stores
+      ansible.builtin.command:
+        cmd: docker volume ls -q
+      environment: "{{ docker_cli_environment }}"
+      register: docker_volumes_before_raw
+      changed_when: false
+      when: docker_image_store_switch | bool
+
+    - name: Record the pre-switch Docker volume names
+      ansible.builtin.set_fact:
+        docker_volumes_before: "{{ docker_volumes_before_raw.stdout_lines | default([]) | sort }}"
+      when: docker_image_store_switch | bool
+
+    # Reclaim BEFORE measuring: the old store's build cache lives under the
+    # overlay2 directory, so flushing first keeps the 2 x used guard from
+    # counting space the switch frees anyway.
+    - name: Flush the old build cache before switching image stores
+      ansible.builtin.command:
+        cmd: docker builder prune -af
+      environment: "{{ docker_cli_environment }}"
+      changed_when: true
+      when:
+        - docker_image_store_switch | bool
+        - docker_image_store_daemon_up | default(false) | bool
+
+    - name: Check whether the overlay2 store that will be left behind exists
+      ansible.builtin.stat:
+        path: "{{ docker_root_dir }}/overlay2"
+      register: docker_overlay2_store_dir
+      when:
+        - docker_image_store_switch | bool
+        - docker_current_driver == 'overlay2'
+        - docker_image_store == 'containerd'
+
+    # -x keeps du from descending into the live */merged overlay mounts, which
+    # would count every image layer once per running container on top of the
+    # physical copies.
+    - name: Measure the overlay2 store that the containerd image store replaces
+      ansible.builtin.command:
+        cmd: du -sx -b {{ docker_root_dir }}/overlay2
+      register: docker_overlay2_du
+      changed_when: false
+      when:
+        - docker_image_store_switch | bool
+        - docker_current_driver == 'overlay2'
+        - docker_image_store == 'containerd'
+        - docker_overlay2_store_dir.stat.exists | default(false)
+
+    - name: Read the free space available to the containerd image store
+      ansible.builtin.command:
+        cmd: df -B1 --output=avail /var/lib/containerd
+      register: docker_containerd_df
+      changed_when: false
+      when:
+        - docker_image_store_switch | bool
+        - docker_current_driver == 'overlay2'
+        - docker_image_store == 'containerd'
+
+    - name: Record the space figures for the image store switch
+      ansible.builtin.set_fact:
+        docker_overlay2_used_bytes: >-
+          {{
+            (docker_overlay2_du.stdout | default('0')).split()[0] | int
+            if (docker_overlay2_store_dir.stat.exists | default(false))
+            else 0
+          }}
+        docker_containerd_avail_bytes: "{{ docker_containerd_df.stdout_lines | last | trim | int }}"
+      when:
+        - docker_image_store_switch | bool
+        - docker_current_driver == 'overlay2'
+        - docker_image_store == 'containerd'
+
+    - name: Require room for both image stores while overlay2 still exists
+      ansible.builtin.fail:
+        msg: >-
+          Not enough free space to switch to the containerd image store: only
+          {{ ((docker_containerd_avail_bytes | int) / 1073741824) | round(2) }} GiB available
+          under /var/lib/containerd, but 2 x the overlay2 store
+          ({{ ((docker_overlay2_used_bytes | int) / 1073741824) | round(2) }} GiB) is required
+          until the old data is pruned. Free space first, for example
+          'docker image prune -a' (unused images only) or moving data off the disk,
+          then re-run. Avoid 'docker system prune -af': it would also delete stopped
+          containers and unused images you may still need.
+      when:
+        - docker_image_store_switch | bool
+        - docker_current_driver == 'overlay2'
+        - docker_image_store == 'containerd'
+        - (docker_containerd_avail_bytes | int) < (2 * (docker_overlay2_used_bytes | int))
+
+    # Stop the workloads gracefully only after the guard has passed, so a failed
+    # guard never disrupts them. dockerd would otherwise SIGKILL after its 10s
+    # default, which can cut a WiredTiger checkpoint short.
+    - name: Warn about the containers that will be stopped for the image store switch
+      ansible.builtin.debug:
+        msg: >-
+          Stopping {{ docker_pre_switch_running_containers | length }} running
+          container(s) gracefully with a {{ docker_image_store_stop_timeout }}s timeout
+          ({{ docker_pre_switch_running_containers | join(', ') }}) so stateful services
+          can flush and checkpoint. They will not reappear on the new image store and
+          must be redeployed afterwards.
+      when:
+        - docker_image_store_switch | bool
+        - docker_pre_switch_running_containers | length > 0
+
+    - name: Gracefully stop running containers before switching image stores
+      ansible.builtin.command:
+        cmd: >-
+          docker stop --time {{ docker_image_store_stop_timeout }}
+          {{ docker_pre_switch_running_containers | join(' ') }}
+      environment: "{{ docker_cli_environment }}"
+      register: docker_image_store_stop
+      changed_when: true
+      when:
+        - docker_image_store_switch | bool
+        - docker_pre_switch_running_containers | length > 0
+
+- name: Verify and clean up the Docker image store change
+  when: docker_image_store_phase | default('pre') == 'post'
+  block:
+    - name: Detect the Docker storage driver after the image store change
+      when: docker_image_store_switch | bool
+      block:
+        # `service: restarted` can return before the API answers on a loaded host,
+        # so retry before declaring failure.
+        - name: Read Docker daemon information after the image store change
+          ansible.builtin.command:
+            cmd: docker info --format json
+          environment: "{{ docker_cli_environment }}"
+          register: docker_info_after_raw
+          until: docker_info_after_raw.rc == 0
+          retries: 30
+          delay: 2
+          changed_when: false
+
+        - name: Refresh the current Docker storage driver
+          ansible.builtin.set_fact:
+            docker_current_driver: "{{ (docker_info_after_raw.stdout | from_json).Driver }}"
+      rescue:
+        - name: Stop when the daemon does not answer after the image store change
+          ansible.builtin.fail:
+            msg: >-
+              The Docker daemon did not answer 'docker info' after switching image
+              stores. Check 'journalctl -u docker -b' and /etc/docker/daemon.json.
+              To roll back, set docker_image_store: overlay2 and re-run the playbook.
+
+    - name: Stop when the daemon is not using the requested image store
+      ansible.builtin.fail:
+        msg: >-
+          Requested docker_image_store '{{ docker_image_store }}' expects storage
+          driver '{{ docker_image_store_target_driver }}', but the daemon reports
+          '{{ docker_current_driver }}'. Check /etc/docker/daemon.json and the Docker
+          logs; to roll back, set docker_image_store: overlay2 and re-run.
+      when:
+        - docker_image_store_switch | bool
+        - (docker_current_driver | default('')) != docker_image_store_target_driver
+
+    - name: Read the Docker volumes after the image store change
+      ansible.builtin.command:
+        cmd: docker volume ls -q
+      environment: "{{ docker_cli_environment }}"
+      register: docker_volumes_after_raw
+      changed_when: false
+      when: docker_image_store_switch | bool
+
+    - name: Record the post-switch Docker volume names
+      ansible.builtin.set_fact:
+        docker_volumes_after: "{{ docker_volumes_after_raw.stdout_lines | default([]) | sort }}"
+      when: docker_image_store_switch | bool
+
+    # Volumes are independent of the image store, so none may disappear. This
+    # mirrors the reference script's `comm -23` check on the recorded volume list.
+    - name: Stop when the image store change lost a Docker volume
+      ansible.builtin.fail:
+        msg: >-
+          These Docker volumes disappeared while switching image stores:
+          {{ (docker_volumes_before | difference(docker_volumes_after)) | join(', ') }}.
+          Volumes live under {{ docker_root_dir | default('/var/lib/docker') }}/volumes and
+          must survive the switch; restore them from backup before continuing.
+      when:
+        - docker_image_store_switch | bool
+        - (docker_volumes_before | difference(docker_volumes_after)) | length > 0
+
+    - name: Warn that containers and images must be redeployed onto the new image store
+      ansible.builtin.debug:
+        msg:
+          - >-
+            The new image store does not see the previous containers or images; they
+            must be redeployed and recreated.
+          - >-
+            Redeploy Compose projects:
+            {{ (docker_pre_switch_compose_projects | default([]) | join(', ')) | default('none', true) }}.
+          - >-
+            Recreate standalone containers:
+            {{ (docker_pre_switch_standalone_containers | default([]) | join(', ')) | default('none', true) }}.
+          - >-
+            To roll back, set docker_image_store: overlay2 and re-run; the old overlay2
+            data is only deleted when docker_prune_old_image_store is true.
+      when: docker_image_store_switch | bool
+
+    - name: Check for mounted overlay2 layers before deleting leftover data
+      ansible.builtin.command:
+        cmd: findmnt -rn -o TARGET
+      register: docker_findmnt_raw
+      changed_when: false
+      when: docker_prune_old_image_store | bool
+
+    - name: Record any overlay2 layers still mounted
+      ansible.builtin.set_fact:
+        docker_mounted_overlay2_layers: >-
+          {{
+            docker_findmnt_raw.stdout_lines | default([])
+            | select('match', '^' ~ (docker_root_dir | default('/var/lib/docker') | regex_escape) ~ '/overlay2/')
+            | list
+          }}
+      when: docker_prune_old_image_store | bool
+
+    - name: Stop when pruning is requested but the containerd image store is not active
+      ansible.builtin.fail:
+        msg: >-
+          docker_prune_old_image_store is true but the daemon is not reporting the
+          containerd image store (storage driver '{{ docker_current_driver }}', expected
+          overlayfs). If the daemon is down, start Docker and re-run: the prune cannot
+          be verified without it. If the daemon is up, set docker_image_store: containerd
+          and run the playbook first; deleting overlay2 data while overlay2 is active
+          would destroy live images.
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) != 'overlayfs'
+
+    - name: Stop when overlay2 layers are still mounted
+      ansible.builtin.fail:
+        msg: >-
+          Overlay2 layers are still mounted under
+          {{ docker_root_dir | default('/var/lib/docker') }}/overlay2
+          ({{ docker_mounted_overlay2_layers | join(', ') }}); refusing to delete live
+          data. Stop the workloads using them and re-run.
+      when:
+        - docker_prune_old_image_store | bool
+        - docker_mounted_overlay2_layers | length > 0
+
+    - name: Check whether the overlay2-era container directory exists
+      ansible.builtin.stat:
+        path: "{{ docker_root_dir | default('/var/lib/docker') }}/containers"
+      register: docker_containers_dir
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) == 'overlayfs'
+        - docker_mounted_overlay2_layers | length == 0
+
+    - name: Find the container metadata that records its storage driver
+      ansible.builtin.find:
+        paths: "{{ docker_root_dir | default('/var/lib/docker') }}/containers"
+        patterns: config.v2.json
+        recurse: true
+        file_type: file
+      register: docker_container_config_files
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) == 'overlayfs'
+        - docker_mounted_overlay2_layers | length == 0
+        - docker_containers_dir.stat.isdir | default(false)
+
+    - name: Read the container metadata files
+      ansible.builtin.slurp:
+        path: "{{ item.path }}"
+      loop: "{{ docker_container_config_files.files | default([]) | map(attribute='path') | list }}"
+      register: docker_container_config_data
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) == 'overlayfs'
+        - docker_mounted_overlay2_layers | length == 0
+        - docker_containers_dir.stat.isdir | default(false)
+
+    - name: Select the containers that used the overlay2 driver
+      ansible.builtin.set_fact:
+        docker_overlay2_container_dirs: >-
+          {{
+            (docker_overlay2_container_dirs | default([]))
+            + [item.source | regex_replace('/config\.v2\.json$', '')]
+          }}
+      loop: "{{ docker_container_config_data.results | default([]) }}"
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) == 'overlayfs'
+        - docker_mounted_overlay2_layers | length == 0
+        - item.content is defined
+        - ((item.content | b64decode | from_json).Driver | default('')) == 'overlay2'
+
+    - name: Delete the leftover overlay2 data (irreversible)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{
+          [docker_root_dir | default('/var/lib/docker') ~ '/overlay2',
+           docker_root_dir | default('/var/lib/docker') ~ '/image/overlay2']
+          + (docker_overlay2_container_dirs | default([]))
+        }}
+      when:
+        - docker_prune_old_image_store | bool
+        - (docker_current_driver | default('')) == 'overlayfs'
+        - docker_mounted_overlay2_layers | length == 0

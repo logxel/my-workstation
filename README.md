@@ -163,6 +163,9 @@ Los componentes opcionales están controlados desde `ansible/group_vars/all/main
 - `openvpn_core_packages` define la base mínima de OpenVPN.
 - `openvpn_network_manager_packages` define el backend adicional que solo se instala cuando el modo `auto` detecta `network-manager` o cuando fuerzas `feature_flags.openvpn=enabled`.
 - `virt_manager_default_uri` define la URI por defecto que usará virt-manager/libvirt en `~/.config/libvirt/libvirt.conf`.
+- `docker_image_store` acepta `overlay2` (por defecto) o `containerd`. Con el valor por defecto el rol no cambia nada: no emite la clave `features` en `daemon.json`, no ejecuta tareas destructivas y no reinicia el daemon. Con `containerd` activa el image store de containerd (que `docker info` reporta como driver `overlayfs`) escribiendo `features.containerd-snapshotter`.
+- `docker_prune_old_image_store` está desactivado por defecto y es irreversible: solo borra los datos del store `overlay2` que quedan atrás cuando el driver ya es `overlayfs` y ningún layer `overlay2` sigue montado.
+- `docker_image_store_stop_timeout` (60 s por defecto) es el tiempo que se concede a los contenedores en ejecución para parar de forma ordenada antes del cambio de image store.
 
 Para instalar el perfil nativo de NetworkManager con los ajustes de split tunnel y split DNS validados en este host, usa:
 
@@ -211,6 +214,8 @@ Las herramientas de escritorio GNOME se comportan así:
 - La instalación de Flatpak comprueba primero qué remotos y aplicaciones existen antes de añadir o instalar nada, para mantener la ejecución repetible.
 - RustDesk se instala desde el `.deb` oficial upstream y no vía Flatpak, porque el servicio nativo de systemd es el camino necesario para acceso pre-login y reinicios limpios del host.
 - Docker usa `json-file` con rotación, modo `non-blocking` y buffer acotado para evitar crecimiento descontrolado de logs y reducir bloqueos por I/O, preservando otras claves ya presentes en `daemon.json` como `data-root`. Los `log-opts` se escriben como strings porque `dockerd` lo exige en `daemon.json`.
+- El cambio al image store de containerd es opt-in y reversible, y está diseñado para que una ejecución normal no se vea afectada. El guard consulta `docker info --format json` para derivar el driver y el `DockerRootDir` reales, y exige espacio libre para dos veces el store `overlay2` medido con `du -sx`: sin `-x`, `du` desciende a los montajes `merged` de los contenedores vivos y cuenta cada capa una vez por contenedor además de la copia física. La caché de build se vacía antes de medir, porque vive dentro de ese mismo directorio y de otro modo el guard exigiría espacio que el propio cambio libera. Si el daemon no responde, el cambio se rechaza en vez de aplicarse sin verificar: un switch sin daemon deja los contenedores antiguos inalcanzables y sin comprobar el espacio ni el conjunto de volúmenes. Antes del reinicio los contenedores en ejecución se paran de forma ordenada con `docker stop --time`, para que servicios con estado como MongoDB puedan hacer checkpoint en lugar de recibir un SIGKILL. `daemon.json` se respalda y se valida con `dockerd --validate` antes de reiniciar, y si `dockerd` lo rechaza se restaura el backup. Volver a `overlay2` y reejecutar deshace el cambio sin borrar nada.
+- La migración al image store de containerd no forma parte del salto a Ubuntu 26.04: es una mejora independiente y no es necesaria para preparar el host para la siguiente LTS.
 - Nix usa `nix_install_mode` para controlar cómo se instala en el host. El valor por defecto es `single-user`, que evita crear la batería de usuarios `nixbld*` en estaciones de trabajo donde no hace falta el daemon multiusuario. Si necesitas el modelo clásico con daemon y build users compartidos, cambia `nix_install_mode` a `multi-user`.
 - En modo `multi-user`, el repositorio sigue usando Determinate Systems para simplificar una instalación consistente en Ubuntu/Pop!_OS.
 - Desde que se retiró Home Manager, el rol `nix` solo instala el binario de Nix; no construye ni activa ningún perfil. `nix/flake.nix` únicamente expone `devShells` (nil, nixpkgs-fmt, statix) y los checks de lint — úsalo con `nix develop` para un shell de validación, no para gestionar paquetes de usuario.
@@ -248,6 +253,7 @@ Si el host ya corrió una versión anterior de este mismo repo (no de Home Manag
 - `feature_flags.virt_manager`, `virt_manager_packages` y `virt_manager_default_uri` si quieres ajustar el stack de virtualización local.
 - Los `feature_flags`, `distro_flatpak_apps` y el modo de integración del gestor de archivos en `ansible/group_vars/all/main.yml`.
 - `feature_flags.openvpn`, `openvpn_core_packages` y `openvpn_network_manager_packages` si quieres ajustar cuándo se instala el backend de OpenVPN y evitar dependencias de NetworkManager cuando no hagan falta.
+- `docker_image_store` si quieres mover Docker al image store de containerd. Ten en cuenta que el guard exige espacio libre para dos stores `overlay2` completos a la vez, así que conviene vaciar la caché de build y liberar disco antes de intentarlo.
 
 Para aprovisionar solo OpenVPN y sus paquetes relacionados:
 
