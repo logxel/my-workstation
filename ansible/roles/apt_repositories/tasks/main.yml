@@ -125,16 +125,20 @@
     - repos
     - brave
 
-- name: Add Brave APT signing key
+- name: Install the Brave APT signing key into a dedicated keyring
   when: common_enable_brave
   tags:
     - repos
     - brave
   block:
-    - name: Add the Brave APT signing key to the system keyring
-      ansible.builtin.apt_key:
+    - name: Fetch the Brave APT signing key
+      ansible.builtin.get_url:
         url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-        state: present
+        dest: /etc/apt/keyrings/brave-browser-archive-keyring.gpg
+        owner: root
+        group: root
+        mode: "0644"
+        force: true
   rescue:
     - name: Warn when Brave APT signing key could not be refreshed
       ansible.builtin.debug:
@@ -150,12 +154,19 @@
     - repos
     - brave
   block:
-    - name: Add the Brave APT repository definition
-      ansible.builtin.apt_repository:
-        repo: "deb [arch={{ common_deb_arch }}] https://brave-browser-apt-release.s3.brave.com/ stable main"
-        state: present
-        filename: brave-browser-release
-        update_cache: false
+    - name: Write the Brave repository definition
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/brave-browser-release.list
+        content: "{{ (brave_repo_parts | join(' ')) ~ '\n' }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        brave_repo_parts:
+          - "deb [arch={{ common_deb_arch }} signed-by=/etc/apt/keyrings/brave-browser-archive-keyring.gpg]"
+          - https://brave-browser-apt-release.s3.brave.com/
+          - stable
+          - main
   rescue:
     - name: Warn when Brave repository registration fails
       ansible.builtin.debug:
@@ -322,64 +333,6 @@
           | default('no error message provided') }}
       changed_when: false
 
-- name: Register the CopyQ PPA repository
-  when: common_install_copyq
-
-  block:
-    - name: Ensure the APT keyrings directory exists for CopyQ
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-      tags:
-        - packages
-        - system
-        - repos
-
-    - name: Install the CopyQ PPA signing key into a dedicated keyring
-      tags:
-        - packages
-        - system
-        - repos
-        - copyq
-      block:
-        - name: Fetch the CopyQ PPA signing key
-          ansible.builtin.get_url:
-            url: >-
-              https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x407DCF2158B84056D11BBC944F0B2F06AA07D22F
-            dest: /etc/apt/keyrings/hluk-copyq.gpg
-            owner: root
-            group: root
-            mode: "0644"
-            force: true
-      rescue:
-        - name: Warn when CopyQ PPA signing key could not be refreshed
-          ansible.builtin.debug:
-            msg: >-
-              WARNING: Could not refresh the CopyQ PPA key from keyserver.ubuntu.com.
-              Continuing bootstrap with the currently available keyring file.
-              Details: {{ ansible_failed_result.msg | default('no error message provided') }}
-          changed_when: false
-
-    - name: Render the CopyQ repository definition
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/hluk-copyq.list
-        content: "{{ (copyq_repo_parts | join(' ')) ~ '\n' }}"
-        owner: root
-        group: root
-        mode: "0644"
-      vars:
-        copyq_repo_parts:
-          - "deb [signed-by=/etc/apt/keyrings/hluk-copyq.gpg]"
-          - https://ppa.launchpadcontent.net/hluk/copyq/ubuntu
-          - "{{ common_ubuntu_codename }}"
-          - main
-      tags:
-        - repos
-        - copyq
-
 - name: Install the Git Core PPA signing key into a dedicated keyring
   when:
     - ansible_facts['distribution'] in supported_distributions
@@ -437,7 +390,6 @@
     or common_enable_brave
     or common_enable_docker
     or common_enable_edge
-    or common_install_copyq
     or common_enable_dev_tools
     or common_enable_warp_terminal
     or (
