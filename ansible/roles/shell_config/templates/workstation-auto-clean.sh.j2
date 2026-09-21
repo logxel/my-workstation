@@ -36,6 +36,36 @@ run_if_available() {
   fi
 }
 
+{% raw %}
+# Remove containers that have been STOPPED for more than N days.
+#
+# Docker has no stop-time filter. `docker container prune --filter until=X`
+# compares the container's CREATED time and never looks at State.FinishedAt
+# (moby daemon/prune.go reads c.Created), so a container created weeks ago but
+# stopped a minute ago still matched -- which is how cortex-backend-1 and
+# cortex-garage-1 were removed on 2026-09-21. This evaluates FinishedAt instead.
+prune_idle_containers() {
+  local age_days="$1"
+  local cutoff
+  cutoff=$(date -d "-${age_days} days" +%s) || return 0
+
+  local id finished epoch
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+
+    finished=$(docker container inspect -f '{{.State.FinishedAt}}' "$id" 2>/dev/null) || continue
+    case "$finished" in ''|0001-01-01T00:00:00Z) continue ;; esac   # never started
+
+    epoch=$(date -d "$finished" +%s 2>/dev/null) || continue
+
+    if (( epoch < cutoff )); then
+      printf 'Removing container stopped %s (>%sd ago): %s\n' "$finished" "$age_days" "$id"
+      docker container rm "$id" || printf 'Could not remove container %s\n' "$id" >&2
+    fi
+  done < <(docker container ls -aq --filter status=exited)
+}
+{% endraw %}
+
 clean_old_files "$HOME/Downloads" {{ workstation_cleanup_downloads_max_age_days }}
 
 clean_old_files "$HOME/.bun/install/cache" {{ workstation_cleanup_bun_cache_max_age_days }}
@@ -47,8 +77,16 @@ run_if_available uv uv cache prune
 run_if_available direnv direnv prune
 run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ nix_cleanup_generation_max_age_days }}d
 
-# Docker — reclaimable but protect resources used in the last week
-run_if_available docker docker system prune -af --filter until=168h
+# Docker -- same scope as the old `docker system prune -af --filter until=168h`,
+# except containers age by how long they have been IDLE (State.FinishedAt) instead
+# of when they were created. Docker has no stop-time filter, so the helper above
+# handles containers; images, networks and build cache are pruned exactly as before.
+if command -v docker >/dev/null 2>&1; then
+  prune_idle_containers {{ workstation_cleanup_docker_container_max_age_days }}
+  run_if_available docker docker image prune -af --filter until=168h
+  run_if_available docker docker network prune -f --filter until=168h
+  run_if_available docker docker builder prune -f --filter until=168h
+fi
 # Flatpak -- clean unused runtimes from system installation (needs sudo)
 run_if_available flatpak sudo flatpak uninstall --unused --noninteractive
 # Systemd journal -- limit size on disk
