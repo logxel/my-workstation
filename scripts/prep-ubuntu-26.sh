@@ -43,7 +43,7 @@ sudo rm -f /etc/apt/sources.list.d/signal-desktop.sources \
 step "4/5  Reclaiming disk space"
 sudo apt-get clean
 sudo apt-get autoremove --purge -y
-sudo journalctl --vacuum-size=200M
+sudo /usr/local/sbin/workstation-journal-vacuum
 sudo snap set system refresh.retain=2
 
 # Collect disabled (old) snap revisions without using a pipeline, so that

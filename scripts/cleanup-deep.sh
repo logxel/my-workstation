@@ -114,16 +114,16 @@ run flatpak uninstall --unused -y
 
 step "System: apt cache, package lists, journal"
 if ((DRY_RUN)); then
-  note "would run: apt-get clean, rm /var/lib/apt/lists/*, journalctl --vacuum-size=100M"
+  note "would run: apt-get clean, rm /var/lib/apt/lists/*, /usr/local/sbin/workstation-journal-vacuum"
 elif sudo -n true 2>/dev/null; then
   sudo apt-get clean
   sudo rm -rf /var/lib/apt/lists/*   # repopulated by the next `apt update`
-  sudo journalctl --vacuum-size=100M
+  sudo /usr/local/sbin/workstation-journal-vacuum
 else
   note "no non-interactive sudo available - run these yourself:"
   note "  sudo apt-get clean"
   note "  sudo rm -rf /var/lib/apt/lists/*"
-  note "  sudo journalctl --vacuum-size=100M"
+  note "  sudo /usr/local/sbin/workstation-journal-vacuum"
 fi
 
 # ---------------------------------------------------------------- Tier 1 (opt-in)
