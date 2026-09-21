@@ -243,6 +243,8 @@ Las herramientas de escritorio GNOME se comportan así:
 - Si una máquina ya tiene Nix multiusuario y quieres eliminar los usuarios `nixbld*`, usa `ansible/nix-migrate-single-user.yml` o `make nix-migrate-single-user`. Ese flujo desinstala la instalación multiusuario existente con `/nix/nix-installer uninstall --no-confirm` cuando detecta Determinate, o aplica los pasos documentados por upstream para Linux con systemd cuando no hay receipt/uninstaller, y luego vuelve a aprovisionar Nix en modo `single-user`.
 - `ansible/nix-clean.yml` / `make nix-clean` ahora solo ejecuta `nix-collect-garbage` genérico — la poda de generaciones de Home Manager se retiró porque ya no se crean generaciones nuevas.
 - Warp Terminal se instala desde el repositorio APT oficial (`releases.warp.dev`), no desde Flatpak (no publican uno) ni desde Nix.
+- `bootstrap.sh` exige `ansible-core` 2.20 o superior cuando el `python3` del host es 3.14+, porque `ansible-core` solo soporta Python 3.14 a partir de 2.20 y las versiones anteriores fallan dentro de la primera tarea con un traceback que no explica la causa. El mínimo es **2.20** y no el 2.21 que fija la imagen del DevContainer: Ubuntu 26.04 trae `ansible-core` 2.20.1 como paquete del sistema, mientras que el DevContainer lo instala por pip y puede permitirse el más reciente. En 24.04 el chequeo no se activa, porque su `ansible-core` 2.16.3 funciona contra el Python 3.12 de esa release.
+- La imagen del DevContainer fija además `ansible-lint>=26.8.0` y `yamllint>=1.38.0`. `yamllint` solo declara soporte de Python 3.14 desde 1.38.0, así que dejarlo sin cota podía resolver a una versión que no funciona en la base 26.04.
 
 ## Migración desde Home Manager
 

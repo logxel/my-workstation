@@ -14,8 +14,8 @@ RUN apt-get update \
 			xz-utils \
 		&& python3 -m pip install --break-system-packages --no-cache-dir \
 			'ansible-core>=2.21' \
-			ansible-lint \
-			yamllint \
+			'ansible-lint>=26.8.0' \
+			'yamllint>=1.38.0' \
 		&& apt-get clean \
 		&& rm -rf /var/lib/apt/lists/*
 
