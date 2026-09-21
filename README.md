@@ -128,6 +128,23 @@ El `Makefile` expone también objetivos separados:
 - `make nix-migrate-single-user`
 - `make nix-clean`
 
+## Scripts de mantenimiento
+
+`scripts/` contiene utilidades que **no** forman parte del aprovisionamiento (Ansible no las invoca), pero se versionan con el repo por ser específicas de este host:
+
+- `prep-ubuntu-26.sh`: preparación previa al salto 24.04 → 26.04. Respalda la configuración de `apt` y `update-manager`, aplica las actualizaciones pendientes, retira ficheros de origen huérfanos, reclama espacio (caché de APT, journal, revisiones de snap) e informa de si hace falta reiniciar. No ejecuta la actualización de release.
+- `cleanup-deep.sh`: recupera espacio en disco. Por defecto solo toca cachés regenerables; `--docker-aggressive` es destructivo y pregunta antes de actuar.
+- `cleanup-volumes.sh`: recupera volúmenes Docker concretos por tiers (`--devcontainer`, `--caches`, `--mongo-orphans`, `--orphan-data`). Toda eliminación está condicionada por la **antigüedad de uso** (`--min-age-days`, 7 días por defecto), no por si un contenedor está corriendo: un devcontainer parado hace una hora sigue estando en uso activo. Los volúmenes sin evidencia de uso se rechazan, y los tiers de datos huérfanos necesitan `sudo` para poder leer el `mtime` del punto de montaje.
+
+Ejemplos:
+
+```bash
+bash ./scripts/prep-ubuntu-26.sh
+bash ./scripts/cleanup-deep.sh --dry-run
+bash ./scripts/cleanup-volumes.sh --dry-run --devcontainer
+sudo bash ./scripts/cleanup-volumes.sh --mongo-orphans
+```
+
 ## Configuración
 
 Los componentes opcionales están controlados desde `ansible/group_vars/all/main.yml`:
