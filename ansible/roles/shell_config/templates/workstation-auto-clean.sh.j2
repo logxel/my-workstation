@@ -10,8 +10,17 @@ clean_old_files() {
     return 0
   fi
 
-  find "$target" -mindepth 1 \( -type f -o -type l \) -mtime +"$age_days" -print -delete
-  find "$target" -mindepth 1 -depth -type d -empty -mtime +"$age_days" -print -delete
+  # Some caches are deliberately immutable. The Go module cache ships 0555
+  # directories and 0444 files, and unlink(2) needs write permission on the
+  # PARENT directory -- so a bare `find -delete` fails with EACCES. Under
+  # `set -Eeuo pipefail` that aborts this whole script, silently skipping every
+  # cleanup below this call (uv/direnv/nix/docker/flatpak/journald). Re-add the
+  # owner write bit first, then delete, and never let one stubborn tree abort
+  # the rest of the run.
+  find "$target" -mindepth 1 -exec chmod u+w {} + 2>/dev/null || true
+
+  find "$target" -mindepth 1 \( -type f -o -type l \) -mtime +"$age_days" -print -delete || true
+  find "$target" -mindepth 1 -depth -type d -empty -mtime +"$age_days" -print -delete || true
 }
 
 run_if_available() {
