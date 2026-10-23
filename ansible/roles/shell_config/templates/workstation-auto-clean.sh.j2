@@ -77,15 +77,15 @@ run_if_available uv uv cache prune
 run_if_available direnv direnv prune
 run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ nix_cleanup_generation_max_age_days }}d
 
-# Docker -- same scope as the old `docker system prune -af --filter until=168h`,
-# except containers age by how long they have been IDLE (State.FinishedAt) instead
-# of when they were created. Docker has no stop-time filter, so the helper above
-# handles containers; images, networks and build cache are pruned exactly as before.
+# Docker -- containers age by how long they have been IDLE (State.FinishedAt)
+# instead of when they were created. Docker has no stop-time filter, so the
+# helper above handles containers; images, networks and build cache are pruned
+# by creation age (days are converted to the hours Docker accepts).
 if command -v docker >/dev/null 2>&1; then
   prune_idle_containers {{ workstation_cleanup_docker_container_max_age_days }}
-  run_if_available docker docker image prune -af --filter until=168h
-  run_if_available docker docker network prune -f --filter until=168h
-  run_if_available docker docker builder prune -f --filter until=168h
+  run_if_available docker docker image prune -af --filter "until={{ (workstation_cleanup_docker_image_max_age_days | int) * 24 }}h"
+  run_if_available docker docker network prune -f --filter "until={{ (workstation_cleanup_docker_network_max_age_days | int) * 24 }}h"
+  run_if_available docker docker builder prune -f --filter "until={{ (workstation_cleanup_docker_build_cache_max_age_days | int) * 24 }}h"
 fi
 # Flatpak -- clean unused runtimes from system installation (needs sudo)
 run_if_available flatpak sudo flatpak uninstall --unused --noninteractive
