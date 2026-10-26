@@ -4,8 +4,8 @@
     that:
       - docker_image_store in ['overlay2', 'containerd']
     fail_msg: >-
-      docker_image_store must be 'overlay2' (classic image store, the default) or
-      'containerd' (containerd image store, reported as the overlayfs storage driver);
+      docker_image_store must be 'containerd' (the default modern image store, reported
+      as the overlayfs storage driver) or 'overlay2' (classic image store);
       got '{{ docker_image_store }}'.
   when: common_enable_docker | default(false)
   tags:
@@ -125,9 +125,9 @@
       ansible.builtin.set_fact:
         docker_daemon_existing_config: {}
 
-# Guards the requested image store before daemon.json is written: the daemon and
-# driver checks, the space requirement and the old build-cache flush all happen
-# here so a doomed migration fails before any half-migrated configuration lands.
+# Guards the requested image store before daemon.json is written: daemon and
+# driver checks, capacity checks, and workload inventory happen here so a
+# refused migration fails before any half-migrated configuration lands.
 - name: Guard the Docker image store before the daemon configuration is written
   ansible.builtin.import_tasks: image_store.yml
   vars:

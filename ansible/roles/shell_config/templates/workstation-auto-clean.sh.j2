@@ -5,8 +5,15 @@ set -Eeuo pipefail
 clean_old_files() {
   local target="$1"
   local age_days="$2"
+  local dir
+  local -a permission_changed=()
 
   if [[ ! -d "$target" ]]; then
+    return 0
+  fi
+
+  # Do not follow a cache-root symlink or alter permissions outside the tree.
+  if [[ -L "$target" ]]; then
     return 0
   fi
 
@@ -14,13 +21,26 @@ clean_old_files() {
   # directories and 0444 files, and unlink(2) needs write permission on the
   # PARENT directory -- so a bare `find -delete` fails with EACCES. Under
   # `set -Eeuo pipefail` that aborts this whole script, silently skipping every
-  # cleanup below this call (uv/direnv/nix/docker/flatpak/journald). Re-add the
-  # owner write bit first, then delete, and never let one stubborn tree abort
-  # the rest of the run.
-  find "$target" -mindepth 1 -exec chmod u+w {} + 2>/dev/null || true
+  # cleanup below this call (uv/direnv/nix/docker/flatpak/journald). Add the
+  # owner write bit temporarily to parent directories, then restore it on
+  # directories that survive pruning; never follow symlinks.
+  if [[ ! -w "$target" ]] && chmod u+w "$target" 2>/dev/null; then
+    permission_changed+=("$target")
+  fi
+  while IFS= read -r -d '' dir; do
+    if [[ ! -w "$dir" ]] && chmod u+w "$dir" 2>/dev/null; then
+      permission_changed+=("$dir")
+    fi
+  done < <(find "$target" -mindepth 1 -type d -print0 2>/dev/null)
 
   find "$target" -mindepth 1 \( -type f -o -type l \) -mtime +"$age_days" -print -delete || true
   find "$target" -mindepth 1 -depth -type d -empty -mtime +"$age_days" -print -delete || true
+
+  for dir in "${permission_changed[@]}"; do
+    if [[ -d "$dir" && ! -L "$dir" ]]; then
+      chmod u-w "$dir" 2>/dev/null || true
+    fi
+  done
 }
 
 run_if_available() {

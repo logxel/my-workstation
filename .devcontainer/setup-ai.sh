@@ -7,7 +7,7 @@
 #
 # Al ejecutarse sin argumentos muestra un selector interactivo: ↑/↓ para
 # moverse, Espacio para marcar/desmarcar ([x]/[ ]) y Enter para confirmar,
-# con OpenCode y gem-team preseleccionados. APM y OpenCode se auto-marcan
+# con OpenCode preseleccionado. gem-team es opt-in; APM y OpenCode se auto-marcan
 # si gem-team está seleccionado (requisito), y OpenCode también si se elige
 # Oh My Opencode Slim. Para uso no interactivo (p. ej. en Dockerfiles o
 # postCreateCommand) se pueden pasar flags:
@@ -57,7 +57,7 @@ usage() {
 Uso: $0 [opciones]
 
 Sin flags, muestra un selector interactivo (↑/↓ + Espacio + Enter).
-Por defecto (y en modo no interactivo): OpenCode + gem-team.
+Por defecto (y en modo no interactivo): solo OpenCode. gem-team es opt-in.
 
 Opciones:
   --all        Instala todas las herramientas
@@ -89,16 +89,16 @@ parse_args() {
     esac
   done
 
-  # Sin flags → defaults (OpenCode + gem-team)
+  # Sin flags → default (OpenCode only; gem-team is explicitly opt-in)
   if [[ "$FLAGS_SET" -eq 0 ]]; then
     DO_OPENCODE=1
-    DO_GEM_TEAM=1
+    DO_GEM_TEAM=0
   fi
 }
 
 choose_tools() {
-  # Selección por defecto: OpenCode + gem-team
-  DO_APM=0; DO_OPENCODE=1; DO_GEM_TEAM=1; DO_CLAUDE=0; DO_OMOS=0
+  # Selección por defecto: OpenCode only
+  DO_APM=0; DO_OPENCODE=1; DO_GEM_TEAM=0; DO_CLAUDE=0; DO_OMOS=0
 
   local -a names=(
     "APM (Agent Package Manager)"
@@ -234,7 +234,18 @@ print_selection() {
 
 # ── Preflight ──────────────────────────────────────────────────────────────
 preflight() {
-  for cmd in curl sudo; do
+  local -a required=(curl)
+
+  # sudo is only needed if APM's official installer fails and its pipx
+  # fallback must install pipx from apt. OpenCode-only default does not need it.
+  if [[ "$DO_APM" -eq 1 ]] \
+    && ! command -v apm &>/dev/null \
+    && ! command -v pipx &>/dev/null; then
+    required+=(sudo)
+  fi
+
+  local cmd
+  for cmd in "${required[@]}"; do
     if ! command -v "$cmd" &>/dev/null; then
       fail "Requerido: $cmd no está instalado"
       return 1
@@ -344,9 +355,8 @@ install_gem_team() {
   if apm install mubaidr/gem-team --target opencode; then
     ok "Extensión gem-team instalada correctamente"
   else
-    # Puede fallar si ya está instalada o si opencode no es detectable
-    warn "No se pudo instalar gem-team."
-    warn "Verifica con: apm list --target opencode"
+    fail "No se pudo instalar gem-team."
+    return 1
   fi
 }
 
@@ -404,8 +414,8 @@ install_omos() {
     echo "  --reset deja copia .bak de la config previa. Verifica el preset:"
     echo "    grep preset ~/.config/opencode/oh-my-opencode-slim.json"
   else
-    warn "No se pudo completar la instalación de Oh My Opencode Slim."
-    warn "Intenta manualmente: bunx oh-my-opencode-slim@latest install"
+    fail "No se pudo completar la instalación de Oh My Opencode Slim."
+    return 1
   fi
 }
 
@@ -443,6 +453,7 @@ print_summary() {
       ok "gem-team:   Instalada en apm.yml"
     else
       warn "gem-team:   No detectada en apm.yml"
+      all_ok=false
     fi
   fi
 
@@ -468,6 +479,7 @@ print_summary() {
   if ! $all_ok; then
     warn "Algunas herramientas no se instalaron correctamente."
     warn "Revisa los mensajes de error arriba o ejecuta el script de nuevo."
+    return 1
   fi
 
   # Sugerir reinicio de shell
@@ -490,7 +502,7 @@ main() {
       choose_tools
     else
       echo ""
-      warn "Sin terminal interactiva — usando selección por defecto (OpenCode + gem-team)."
+      warn "Sin terminal interactiva — usando selección por defecto (solo OpenCode)."
       warn "Para otra selección usa flags (p. ej. $0 --all)."
     fi
   fi
@@ -511,25 +523,27 @@ main() {
   # chequeo para no reinstalar lo que ya está instalado.
   ensure_common_bins_in_path
 
-  # Cada paso es independiente: un fallo no aborta el resto,
-  # el resumen final reporta qué quedó pendiente.
+  # Cada step is attempted, but any selected tool failure is returned after
+  # the summary so automation cannot mistake a partial install for success.
+  local install_failed=0
   if [[ "$DO_APM" -eq 1 ]]; then
-    install_apm || true
+    install_apm || install_failed=1
   fi
   if [[ "$DO_OPENCODE" -eq 1 ]]; then
-    install_opencode || true
+    install_opencode || install_failed=1
   fi
   if [[ "$DO_GEM_TEAM" -eq 1 ]]; then
-    install_gem_team || true
+    install_gem_team || install_failed=1
   fi
   if [[ "$DO_CLAUDE" -eq 1 ]]; then
-    install_claude || true
+    install_claude || install_failed=1
   fi
   if [[ "$DO_OMOS" -eq 1 ]]; then
-    install_omos || true
+    install_omos || install_failed=1
   fi
 
-  print_summary
+  print_summary || install_failed=1
+  return "$install_failed"
 }
 
 main "$@"

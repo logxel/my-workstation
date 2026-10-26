@@ -18,7 +18,9 @@
 set -Eeuo pipefail
 
 STAMP="$(date +%F-%H%M)"
-BACKUP="$HOME/apt-config-backup-$STAMP.tar.gz"
+# Create the destination as the invoking user with mode 0600 before sudo tar
+# writes it, so APT source credentials are not exposed to other local users.
+BACKUP="$(mktemp "$HOME/apt-config-backup-$STAMP.XXXXXX.tar.gz")"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 

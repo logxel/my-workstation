@@ -1,12 +1,34 @@
 ---
-# Shared discovery prelude: runs regardless of feature state so both the
-# enable and disable branches operate on the same, verified view of swap.
-# Only active file swaps or regular files carrying a swap signature may ever
-# be removed. Partition/disk swap entries are intentionally never touched.
+# Shared discovery prelude: runs regardless of feature state so both branches
+# use the same verified view. A swap signature proves file type, not ownership;
+# only files with a root-owned role marker may be rotated or removed.
 - name: Discover swap state
   tags:
     - swap
   block:
+    - name: Identify swap-file paths managed by this role
+      ansible.builtin.set_fact:
+        swap_path_alt: "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
+        swap_ownership_marker_suffix: ".my-workstation-managed"
+        swap_managed_paths:
+          - "{{ swap_file_path }}"
+          - "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
+
+    - name: Inspect role ownership markers for configured swap paths
+      ansible.builtin.stat:
+        path: "{{ item }}{{ swap_ownership_marker_suffix }}"
+        follow: false
+      loop: "{{ swap_managed_paths }}"
+      register: swap_ownership_markers
+
+    - name: Record configured swap paths owned by this role
+      ansible.builtin.set_fact:
+        swap_owned_paths: "{{ swap_ownership_markers.results
+          | selectattr('stat.isreg')
+          | selectattr('stat.pw_name', 'equalto', 'root')
+          | map(attribute='item')
+          | list }}"
+
     - name: Read active swap entries from proc
       ansible.builtin.command:
         cmd: cat /proc/swaps
@@ -39,7 +61,10 @@
 
     - name: Build swap candidate list
       ansible.builtin.set_fact:
-        swap_candidates: "{{ (swap_active_files + swap_fstab_files) | unique | list }}"
+        swap_candidates: "{{ (swap_active_files + swap_fstab_files + swap_managed_paths)
+          | unique
+          | select('in', swap_managed_paths)
+          | list }}"
 
     - name: Stat swap candidates
       ansible.builtin.stat:
@@ -76,7 +101,10 @@
 
     - name: Compute verified swap removal set
       ansible.builtin.set_fact:
-        swap_verified_removals: "{{ (swap_active_files + swap_sig_files) | unique | list }}"
+        swap_verified_removals: "{{ (swap_active_files + swap_sig_files)
+          | unique
+          | select('in', swap_owned_paths)
+          | list }}"
 
 - name: Calculate swap file size from available RAM
   when: common_enable_swap | default(false)
@@ -136,19 +164,21 @@
         state: absent
       loop: "{{ swap_verified_removals }}"
 
+    - name: Remove ownership markers for retired swap files
+      ansible.builtin.file:
+        path: "{{ item }}{{ swap_ownership_marker_suffix }}"
+        state: absent
+      loop: "{{ swap_verified_removals }}"
+
     - name: Confirm teardown
       ansible.builtin.debug:
-        msg: "Swap disabled — removed verified swap files and their fstab entries"
+        msg: "Swap disabled — removed only swap files marked as managed by this role"
 
 - name: Setup swap file when feature is enabled
   when: common_enable_swap | default(false)
   tags:
     - swap
   block:
-    - name: Derive alternate swap file path
-      ansible.builtin.set_fact:
-        swap_path_alt: "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
-
     - name: Stat managed swap file paths
       ansible.builtin.stat:
         path: "{{ item }}"
@@ -169,14 +199,45 @@
           else swap_paths_stat.results[1].stat.size if swap_current == swap_path_alt
           else 0 }}"
 
+    - name: Check if current swap needs migration
+      ansible.builtin.set_fact:
+        swap_needs_migration: "{{ swap_current is none
+          or (
+            swap_current in swap_owned_paths
+            and (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576
+          ) }}"
+
     - name: Determine next swap path for rotation
       ansible.builtin.set_fact:
         swap_next: "{{ swap_path_alt if swap_current == swap_file_path else swap_file_path }}"
 
-    - name: Check if current swap needs migration
-      ansible.builtin.set_fact:
-        swap_needs_migration: "{{ swap_current is none
-          or (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576 }}"
+    - name: Inspect the next swap path before rotation
+      ansible.builtin.stat:
+        path: "{{ swap_next }}"
+      register: swap_next_stat
+      when: swap_needs_migration
+
+    - name: Refuse to retire the current swap when the active alternate is undersized
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to remove {{ swap_current }} because {{ swap_next }} is already
+          active but does not match the requested {{ swap_size_mb }} MiB size.
+          Resolve the alternate swap manually before retrying.
+      when:
+        - swap_needs_migration
+        - swap_next in swap_active_files
+        - ((swap_next_stat.stat.size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs >= 1048576
+
+    - name: Refuse to overwrite an unowned or unverified file at the swap target
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to replace {{ swap_next }} because it exists without a valid,
+          root-owned {{ swap_ownership_marker_suffix }} marker and verified swap
+          signature. Inspect it before explicitly adopting it for this role.
+      when:
+        - swap_needs_migration
+        - swap_next_stat.stat.exists
+        - swap_next not in swap_verified_removals
 
     - name: Derive final swap target
       ansible.builtin.set_fact:
@@ -228,6 +289,15 @@
           when: swap_next not in swap_active_files
           changed_when: true
 
+        - name: Mark the new swap file as owned by this role
+          ansible.builtin.copy:
+            dest: "{{ swap_next }}{{ swap_ownership_marker_suffix }}"
+            content: "{{ swap_next }}\n"
+            owner: root
+            group: root
+            mode: "0600"
+          when: swap_next not in swap_active_files
+
     # The replacement is created/formatted/activated before the old swap is
     # swapped off, so the machine always has headroom. A failed swapoff must
     # abort before any file removal: unlinking a still-active swap discards
@@ -252,6 +322,12 @@
         state: absent
       loop: "{{ swap_removals }}"
 
+    - name: Remove ownership markers for obsolete swap files
+      ansible.builtin.file:
+        path: "{{ item }}{{ swap_ownership_marker_suffix }}"
+        state: absent
+      loop: "{{ swap_removals }}"
+
     - name: Ensure correct swap entry in fstab
       ansible.builtin.lineinfile:
         path: /etc/fstab
@@ -259,3 +335,4 @@
         line: "{{ swap_final }} none swap sw,pri={{ swap_priority }} 0 0"
         state: present
         backup: true
+      when: swap_needs_migration or swap_current in swap_owned_paths

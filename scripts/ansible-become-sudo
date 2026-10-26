@@ -1,0 +1,7 @@
+#!/bin/sh
+# Select classic sudo when present (Ubuntu 26.04 sudo-rs compatibility), while
+# remaining usable on supported Pop!_OS/Ubuntu releases that only ship sudo.
+if [ -x /usr/bin/sudo.ws ]; then
+  exec /usr/bin/sudo.ws "$@"
+fi
+exec /usr/bin/sudo "$@"

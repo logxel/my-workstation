@@ -66,7 +66,10 @@
       changed_when: false
 
 - name: Render the VS Code repository definition
-  ansible.builtin.include_tasks: render_source.yml
+  ansible.builtin.include_tasks:
+    file: render_source.yml
+    apply:
+      tags: [repos, vscode]
   vars:
     apt_source_name: vscode
     apt_source_uris: https://packages.microsoft.com/repos/code
@@ -80,7 +83,10 @@
     - vscode
 
 - name: Render the Microsoft Edge repository definition
-  ansible.builtin.include_tasks: render_source.yml
+  ansible.builtin.include_tasks:
+    file: render_source.yml
+    apply:
+      tags: [packages, system, repos, edge]
   vars:
     apt_source_name: microsoft-edge-stable
     apt_source_uris: https://packages.microsoft.com/repos/edge
@@ -119,7 +125,10 @@
       changed_when: false
 
 - name: Register the Brave repository
-  ansible.builtin.include_tasks: render_source.yml
+  ansible.builtin.include_tasks:
+    file: render_source.yml
+    apply:
+      tags: [repos, brave]
   vars:
     apt_source_name: brave-browser-release
     apt_source_uris: https://brave-browser-apt-release.s3.brave.com/
@@ -158,7 +167,10 @@
       changed_when: false
 
 - name: Render the Docker repository definition
-  ansible.builtin.include_tasks: render_source.yml
+  ansible.builtin.include_tasks:
+    file: render_source.yml
+    apply:
+      tags: [packages, system, repos, docker]
   vars:
     apt_source_name: docker
     apt_source_uris: https://download.docker.com/linux/ubuntu
@@ -198,7 +210,10 @@
       changed_when: true
 
     - name: Render the NodeSource repository definition
-      ansible.builtin.include_tasks: render_source.yml
+      ansible.builtin.include_tasks:
+        file: render_source.yml
+        apply:
+          tags: [packages, system, repos, dev-tools, nodejs]
       vars:
         apt_source_name: nodesource
         apt_source_uris: "https://deb.nodesource.com/node_{{ nodesource_major_version }}.x"
@@ -240,7 +255,10 @@
       changed_when: true
 
     - name: Render the Warp Terminal repository definition
-      ansible.builtin.include_tasks: render_source.yml
+      ansible.builtin.include_tasks:
+        file: render_source.yml
+        apply:
+          tags: [packages, system, repos, warp-terminal]
       vars:
         apt_source_name: warpdotdev
         apt_source_uris: https://releases.warp.dev/linux/deb
@@ -287,7 +305,10 @@
       changed_when: false
 
 - name: Render the Git Core PPA repository definition
-  ansible.builtin.include_tasks: render_source.yml
+  ansible.builtin.include_tasks:
+    file: render_source.yml
+    apply:
+      tags: [packages, system, repos, git]
   vars:
     apt_source_name: git-core-ppa
     apt_source_uris: https://ppa.launchpadcontent.net/git-core/ppa/ubuntu

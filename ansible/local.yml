@@ -24,18 +24,30 @@
           tags:
             - repos
             - vscode
+            - edge
             - brave
+            - docker
+            - git
+            - copyq
             - dev-tools
             - nodejs
             - warp-terminal
+            - system
+            - packages
       when: common_run_role_apt_repositories
       tags:
         - repos
         - vscode
+        - edge
         - brave
+        - docker
+        - git
+        - copyq
         - dev-tools
         - nodejs
         - warp-terminal
+        - system
+        - packages
 
     - name: Manage system packages and shell setup
       ansible.builtin.include_role:
@@ -153,7 +165,7 @@
         - rustup
         - rust
 
-    - name: Install AI tools (OpenCode, APM, gem-team)
+    - name: Install AI tools (OpenCode, optional APM/gem-team)
       ansible.builtin.include_role:
         name: ai_tools
         apply:
@@ -161,11 +173,15 @@
             - ai-tools
             - opencode
             - apm
-      when: common_run_role_ai_tools
+            - gem-team
+      when:
+        - common_run_role_ai_tools
+        - common_enable_ai_tools
       tags:
         - ai-tools
         - opencode
         - apm
+        - gem-team
 
     - name: Install developer tooling (bun, uv, dust, Node.js)
       ansible.builtin.include_role:

@@ -5,18 +5,30 @@
   register: ai_tools_apm_bin
   become: true
   become_user: "{{ local_user }}"
+  when: common_enable_gem_team
 
-- name: Install APM via official installer
-  ansible.builtin.shell:
-    cmd: set -o pipefail; curl -sSL https://aka.ms/apm-unix | sh
-    executable: /bin/bash
-  args:
-    creates: "{{ local_home }}/.local/bin/apm"
-  become: true
-  become_user: "{{ local_user }}"
-  register: ai_tools_apm_official
-  when: not ai_tools_apm_bin.stat.exists
-  changed_when: true
+- name: Try installing APM via the official installer
+  when:
+    - common_enable_gem_team
+    - not ai_tools_apm_bin.stat.exists
+  block:
+    - name: Install APM via official installer
+      ansible.builtin.shell:
+        cmd: set -o pipefail; curl -sSL https://aka.ms/apm-unix | sh
+        executable: /bin/bash
+      args:
+        creates: "{{ local_home }}/.local/bin/apm"
+      become: true
+      become_user: "{{ local_user }}"
+      register: ai_tools_apm_official
+      changed_when: true
+  rescue:
+    - name: Report official APM installer failure before trying pipx fallback
+      ansible.builtin.debug:
+        msg: >-
+          Official APM install failed; continuing with the pipx fallback.
+          Details: {{ ansible_failed_result.msg | default('no error message provided') }}
+      changed_when: false
 
 - name: Check APM after official installer
   ansible.builtin.stat:
@@ -24,7 +36,9 @@
   register: ai_tools_apm_post_official
   become: true
   become_user: "{{ local_user }}"
-  when: not ai_tools_apm_bin.stat.exists
+  when:
+    - common_enable_gem_team
+    - not ai_tools_apm_bin.stat.exists
 
 - name: Install pipx (fallback prerequisite)
   ansible.builtin.apt:
@@ -33,6 +47,7 @@
     install_recommends: false
   register: ai_tools_pipx_install
   when:
+    - common_enable_gem_team
     - not ai_tools_apm_bin.stat.exists
     - not ai_tools_apm_post_official.stat.exists | default(false)
 
@@ -45,6 +60,7 @@
   environment:
     PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
   when:
+    - common_enable_gem_team
     - not ai_tools_apm_bin.stat.exists
     - not ai_tools_apm_post_official.stat.exists | default(false)
   register: ai_tools_apm_pipx
@@ -56,6 +72,7 @@
       APM could not be installed via the official installer or pipx.
       Try manually: pipx install apm-cli
   when:
+    - common_enable_gem_team
     - not ai_tools_apm_bin.stat.exists
     - not ai_tools_apm_post_official.stat.exists | default(false)
     - ai_tools_apm_pipx is defined
@@ -104,7 +121,9 @@
   register: ai_tools_apm_available
   become: true
   become_user: "{{ local_user }}"
-  when: ai_tools_opencode_post.stat.exists | default(true)
+  when:
+    - common_enable_gem_team
+    - ai_tools_opencode_post.stat.exists | default(true)
 
 - name: Install gem-team extension for OpenCode via APM
   ansible.builtin.shell:
@@ -119,10 +138,10 @@
     HOME: "{{ local_home }}"
     PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
   when:
+    - common_enable_gem_team
     - ai_tools_apm_available.stat.exists | default(false)
     - ai_tools_opencode_post.stat.exists | default(false)
   register: ai_tools_gem_team
-  failed_when: false
   changed_when: ai_tools_gem_team.rc == 0
 
 - name: Ensure user-level OpenCode agents directory exists
@@ -133,6 +152,7 @@
   become: true
   become_user: "{{ local_user }}"
   when:
+    - common_enable_gem_team
     - ai_tools_apm_available.stat.exists | default(false)
     - ai_tools_opencode_post.stat.exists | default(false)
 
@@ -145,6 +165,7 @@
   become: true
   become_user: "{{ local_user }}"
   when:
+    - common_enable_gem_team
     - ai_tools_apm_available.stat.exists | default(false)
     - ai_tools_opencode_post.stat.exists | default(false)
 
@@ -158,6 +179,7 @@
   become: true
   become_user: "{{ local_user }}"
   when:
+    - common_enable_gem_team
     - ai_tools_apm_available.stat.exists | default(false)
     - ai_tools_opencode_post.stat.exists | default(false)
     - ai_tools_gem_agents.files | default([]) | length > 0
@@ -172,7 +194,9 @@
     PATH: "{{ local_home }}/.local/bin:{{ ansible_facts.env.PATH | default('/usr/local/bin:/usr/bin:/bin') }}"
   register: ai_tools_apm_version
   changed_when: false
-  when: ai_tools_apm_available.stat.exists | default(false)
+  when:
+    - common_enable_gem_team
+    - ai_tools_apm_available.stat.exists | default(false)
 
 - name: Verify OpenCode installation
   ansible.builtin.shell:
@@ -189,13 +213,15 @@
     msg: |
       === AI Tools Installation Summary ===
       APM:      {{ ai_tools_apm_version.stdout
-        if (ai_tools_apm_version.stdout is defined and ai_tools_apm_version.rc == 0)
+        if (common_enable_gem_team and ai_tools_apm_version.stdout is defined and ai_tools_apm_version.rc == 0)
+        else 'NOT REQUESTED' if not common_enable_gem_team
         else 'NOT INSTALLED' }}
       OpenCode: {{ ai_tools_opencode_version.stdout
         if (ai_tools_opencode_version.stdout is defined and ai_tools_opencode_version.rc == 0)
         else 'NOT INSTALLED' }}
       gem-team: {{ 'Installed'
-        if (ai_tools_gem_team.rc is defined and ai_tools_gem_team.rc == 0)
+        if (common_enable_gem_team and ai_tools_gem_team.rc is defined and ai_tools_gem_team.rc == 0)
+        else 'Disabled' if not common_enable_gem_team
         else 'Check apm.yml' }}
 
       If any commands are missing from PATH after installation, run:

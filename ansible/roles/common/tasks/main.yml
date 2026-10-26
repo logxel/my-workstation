@@ -192,6 +192,14 @@
             else 'disabled' if common_feature_flags.ai_tools == false
             else common_feature_flags.ai_tools
           }}
+        common_feature_mode_gem_team: >-
+          {{
+            'enabled' if 'gem_team' in common_only_features
+            else 'disabled' if common_selective_feature_run
+            else 'enabled' if common_feature_flags.gem_team == true
+            else 'disabled' if common_feature_flags.gem_team == false
+            else common_feature_flags.gem_team
+          }}
         common_feature_mode_dev_tools: >-
           {{
             'enabled' if 'dev_tools' in common_only_features
@@ -238,6 +246,7 @@
           - common_feature_mode_file_manager_integration in ['enabled', 'disabled', 'auto']
           - common_feature_mode_rustup in ['enabled', 'disabled', 'auto']
           - common_feature_mode_ai_tools in ['enabled', 'disabled', 'auto']
+          - common_feature_mode_gem_team in ['enabled', 'disabled', 'auto']
           - common_feature_mode_dev_tools in ['enabled', 'disabled', 'auto']
           - common_feature_mode_warp_terminal in ['enabled', 'disabled', 'auto']
           - common_feature_mode_shell_config in ['enabled', 'disabled', 'auto']
@@ -405,7 +414,8 @@
             + ([ 'org.mozilla.Thunderbird' ] if common_feature_mode_thunderbird != 'disabled' else [])
           }}
         common_enable_rustup: "{{ common_feature_mode_rustup != 'disabled' }}"
-        common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled' }}"
+        common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled' or common_feature_mode_gem_team != 'disabled' }}"
+        common_enable_gem_team: "{{ common_feature_mode_gem_team != 'disabled' }}"
         common_enable_dev_tools: "{{ common_feature_mode_dev_tools != 'disabled' }}"
         common_enable_warp_terminal: "{{ common_feature_mode_warp_terminal != 'disabled' }}"
         common_enable_shell_config: "{{ common_feature_mode_shell_config != 'disabled' }}"
@@ -505,6 +515,7 @@
           {{
             (not common_selective_feature_run)
             or 'ai_tools' in common_only_features
+            or 'gem_team' in common_only_features
           }}
         common_run_role_dev_tools: >-
           {{

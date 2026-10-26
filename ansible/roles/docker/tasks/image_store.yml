@@ -5,7 +5,7 @@
 # This file is imported twice from main.yml and selects its phase with the
 # docker_image_store_phase variable:
 #   pre  - runs BEFORE daemon.json is written: validate, guard, record the
-#          pre-switch state, stop the workloads and flush the old build cache.
+#          pre-switch state, check capacity, and stop the workloads.
 #          All guards fail here, before any half-migration is written.
 #   post - runs AFTER the daemon has been restarted: verify the driver and the
 #          volume set, warn about containers/images that need a redeploy and,
@@ -22,23 +22,14 @@
 - name: Evaluate the Docker image store before the daemon configuration is written
   when: docker_image_store_phase | default('pre') == 'pre'
   block:
-    # Pin every docker CLI call to the local daemon so an ambient DOCKER_HOST or
-    # DOCKER_CONTEXT inherited by `ansible_connection: local` cannot make these
-    # guards inspect a different daemon than the one whose daemon.json we write.
+    # Pin every docker CLI call to the local daemon. DOCKER_CONTEXT takes
+    # precedence over DOCKER_HOST in the CLI, so clear the ambient context as
+    # well as setting the local socket.
     - name: Pin the Docker CLI to the local daemon socket
       ansible.builtin.set_fact:
         docker_cli_environment:
           DOCKER_HOST: "unix:///var/run/docker.sock"
-
-    - name: Compose the Docker daemon configuration with the requested image store feature
-      ansible.builtin.set_fact:
-        docker_daemon_config_with_image_store: >-
-          {{
-            docker_daemon_config
-            | combine({'features': {'containerd-snapshotter': true}}, recursive=True)
-            if docker_image_store == 'containerd'
-            else docker_daemon_config
-          }}
+          DOCKER_CONTEXT: ""
 
     # When rolling back to overlay2 the feature key must be ABSENT, and a
     # recursive merge cannot delete a key. This override carries the final
@@ -93,7 +84,7 @@
         # A containerd switch or a destructive prune without a responsive daemon
         # is exactly the unguarded, unverified migration we must refuse: the
         # driver, the free space and the container/volume set cannot be checked.
-        # The plain overlay2 default has nothing to migrate and skips cleanly.
+        # An explicit overlay2 target has no containerd migration request and skips cleanly.
         - name: Stop when a guarded image store change is requested without a daemon
           ansible.builtin.fail:
             msg: >-
@@ -115,6 +106,20 @@
           {{
             (docker_image_store_daemon_up | default(false) | bool)
             and (docker_current_driver | default('')) != docker_image_store_target_driver
+          }}
+
+    # When containerd is already active, do not add a redundant feature flag:
+    # on newer Docker releases it may already be the default, and rewriting
+    # daemon.json only to restate it would cause an avoidable daemon restart.
+    # A real overlay2 -> containerd switch still writes the explicit flag.
+    - name: Compose the Docker daemon configuration for a requested store switch
+      ansible.builtin.set_fact:
+        docker_daemon_config_with_image_store: >-
+          {{
+            docker_daemon_config
+            | combine({'features': {'containerd-snapshotter': true}}, recursive=True)
+            if docker_image_store == 'containerd' and docker_image_store_switch | bool
+            else docker_daemon_config
           }}
 
     - name: Report when the requested image store is already active
@@ -215,18 +220,6 @@
       ansible.builtin.set_fact:
         docker_volumes_before: "{{ docker_volumes_before_raw.stdout_lines | default([]) | sort }}"
       when: docker_image_store_switch | bool
-
-    # Reclaim BEFORE measuring: the old store's build cache lives under the
-    # overlay2 directory, so flushing first keeps the 2 x used guard from
-    # counting space the switch frees anyway.
-    - name: Flush the old build cache before switching image stores
-      ansible.builtin.command:
-        cmd: docker builder prune -af
-      environment: "{{ docker_cli_environment }}"
-      changed_when: true
-      when:
-        - docker_image_store_switch | bool
-        - docker_image_store_daemon_up | default(false) | bool
 
     - name: Check whether the overlay2 store that will be left behind exists
       ansible.builtin.stat:

@@ -5,6 +5,10 @@ dotfiles_repo: "{{ local_home }}/my-workstation"
 supported_distributions:
   - Ubuntu
   - Pop!_OS
+# Use an absolute, playbook-relative wrapper path. Ansible invokes become
+# commands from a temporary module directory, so a relative become_exe in
+# ansible.cfg cannot reliably find the repository script.
+ansible_become_exe: "{{ playbook_dir }}/../scripts/ansible-become-sudo"
 deb_arch_map:
   x86_64: amd64
   amd64: amd64
@@ -36,6 +40,7 @@ feature_flags_defaults:
   openvpn: auto
   rustup: enabled
   ai_tools: enabled
+  gem_team: disabled
   file_manager_integration: auto
   dev_tools: enabled
   warp_terminal: enabled
@@ -149,14 +154,12 @@ docker_daemon_config:
     gc:
       enabled: true
       defaultKeepStorage: 20GB
-# Docker image store. The default keeps today's classic overlay2 image store
-# (DockerRootDir /var/lib/docker) and changes nothing. Set to "containerd" to
-# switch to the containerd image store, which `docker info` reports as the
-# "overlayfs" storage driver and keeps images under /var/lib/containerd.
-# Rollback: set this back to "overlay2" and re-run; the containerd-snapshotter
-# feature flag is removed and the old overlay2 data stays on disk until
-# docker_prune_old_image_store is explicitly enabled.
-docker_image_store: overlay2
+# Use Docker's modern containerd image store by default. `docker info` reports
+# this as the "overlayfs" storage driver. Existing overlay2 installations are
+# migrated by the guarded image-store role; their old data is retained unless
+# docker_prune_old_image_store is explicitly enabled. Set to "overlay2" only
+# when a host needs the classic store or to roll back.
+docker_image_store: containerd
 # Seconds that "docker stop" waits for each running container before SIGKILL
 # when the image store switch stops the workloads. The 10s Docker default can
 # cut a stateful service (for example MongoDB/WiredTiger) checkpoint short, so
@@ -168,6 +171,9 @@ docker_image_store_stop_timeout: 60
 docker_prune_old_image_store: false
 docker_desktop_cleanup_approved: false
 vscode_file_manager_integration: auto
+# Existing swap files are managed only when a root-owned
+# <path>.my-workstation-managed marker exists. The role creates markers for new
+# swap files; pre-existing files are left untouched unless explicitly adopted.
 swap_file_path: /swapfile
 swap_priority: 500
 nix_install_mode: single-user
