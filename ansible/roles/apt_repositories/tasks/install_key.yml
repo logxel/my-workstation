@@ -1,0 +1,42 @@
+---
+- name: Stage and validate repository signing key
+  block:
+    - name: Create a private temporary key file
+      ansible.builtin.tempfile:
+        state: file
+        prefix: workstation-apt-key-
+      register: apt_repositories_key_temp
+
+    - name: Download the repository signing key to the temporary file
+      ansible.builtin.get_url:
+        url: "{{ apt_key_url }}"
+        dest: "{{ apt_repositories_key_temp.path }}"
+        mode: "0600"
+        force: true
+
+    - name: Validate the staged repository signing key
+      ansible.builtin.script:
+        cmd: >-
+          {{ role_path }}/files/validate_apt_key.py {{ apt_repositories_key_temp.path | quote }}
+          {{ apt_key_dest | quote }} {{ apt_key_fingerprint | default('') | quote }}
+      changed_when: false
+
+    - name: Install the validated repository signing key
+      ansible.builtin.copy:
+        src: "{{ apt_repositories_key_temp.path }}"
+        dest: "{{ apt_key_dest }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Record the validated repository signing key
+      ansible.builtin.set_fact:
+        apt_repositories_validated_downloads: >-
+          {{ apt_repositories_validated_downloads | default({}) | combine({apt_key_dest: true}) }}
+  always:
+    - name: Remove the temporary repository signing key
+      ansible.builtin.file:
+        path: "{{ apt_repositories_key_temp.path }}"
+        state: absent
+      when: apt_repositories_key_temp.path is defined

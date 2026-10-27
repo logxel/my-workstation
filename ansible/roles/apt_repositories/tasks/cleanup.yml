@@ -1,12 +1,11 @@
 ---
-# Each legacy one-line .list removal below MUST carry the exact same tag list
-# as its corresponding render task in main.yml, so that a tag-scoped run can
-# never remove a legacy definition without (re)writing its deb822 replacement.
+# Replacements must have been rendered successfully during this run. Keep old
+# keyrings: unmanaged sources may still refer to them.
 - name: Remove legacy Microsoft Edge source file
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/microsoft-edge.list
     state: absent
-  when: common_enable_edge
+  when: apt_repositories_rendered_sources['microsoft-edge-stable'] | default(false)
   tags:
     - packages
     - system
@@ -17,7 +16,7 @@
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/vscode.list
     state: absent
-  when: common_enable_vscode
+  when: apt_repositories_rendered_sources['vscode'] | default(false)
   tags:
     - repos
     - vscode
@@ -26,33 +25,27 @@
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/microsoft-edge-stable.list
     state: absent
-  when: common_enable_edge
+  when: apt_repositories_rendered_sources['microsoft-edge-stable'] | default(false)
   tags:
     - packages
     - system
     - repos
     - edge
 
-- name: Remove legacy Brave .list definition and stale keyring
+- name: Remove legacy Brave .list definition
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: /etc/apt/sources.list.d/brave-browser-release.list
     state: absent
-  loop:
-    - /etc/apt/sources.list.d/brave-browser-release.list
-    - /usr/share/keyrings/brave-browser-archive-keyring.gpg
-  when: common_enable_brave
+  when: apt_repositories_rendered_sources['brave-browser-release'] | default(false)
   tags:
     - repos
     - brave
 
-- name: Remove legacy Docker .list definition and stale keyring
+- name: Remove legacy Docker .list definition
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: /etc/apt/sources.list.d/docker.list
     state: absent
-  loop:
-    - /etc/apt/sources.list.d/docker.list
-    - /usr/share/keyrings/docker-archive-keyring.gpg
-  when: common_enable_docker
+  when: apt_repositories_rendered_sources['docker'] | default(false)
   tags:
     - packages
     - system
@@ -63,7 +56,7 @@
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/nodesource.list
     state: absent
-  when: common_enable_dev_tools
+  when: apt_repositories_rendered_sources['nodesource'] | default(false)
   tags:
     - packages
     - system
@@ -75,7 +68,7 @@
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/warpdotdev.list
     state: absent
-  when: common_enable_warp_terminal
+  when: apt_repositories_rendered_sources['warpdotdev'] | default(false)
   tags:
     - packages
     - system
@@ -86,9 +79,7 @@
   ansible.builtin.file:
     path: /etc/apt/sources.list.d/git-core-ppa.list
     state: absent
-  when:
-    - ansible_facts['distribution'] in supported_distributions
-    - not common_selective_feature_run or common_enable_git_credential_oauth
+  when: apt_repositories_rendered_sources['git-core-ppa'] | default(false)
   tags:
     - packages
     - system
@@ -103,7 +94,6 @@
     - /etc/apt/sources.list.d/ppa_hluk_copyq_noble.list
     - /etc/apt/sources.list.d/ppa_hluk_copyq_resolute.list
     - /etc/apt/sources.list.d/hluk-copyq.list
-    - /etc/apt/keyrings/hluk-copyq.gpg
   tags:
     - repos
     - copyq
@@ -116,10 +106,10 @@
       - git-core-ubuntu-ppa-*.list
       - git-core-ubuntu-ppa-*.sources
   register: apt_repositories_git_core_ppa_legacy_sources
-  when:
-    - ansible_facts['distribution'] in supported_distributions
-    - not common_selective_feature_run or common_enable_git_credential_oauth
+  when: apt_repositories_rendered_sources['git-core-ppa'] | default(false)
   tags:
+    - packages
+    - system
     - repos
     - git
 
@@ -127,12 +117,13 @@
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: absent
-  loop: "{{ apt_repositories_git_core_ppa_legacy_sources.files }}"
+  loop: "{{ apt_repositories_git_core_ppa_legacy_sources.files | default([]) }}"
   when:
-    - ansible_facts['distribution'] in supported_distributions
-    - not common_selective_feature_run or common_enable_git_credential_oauth
+    - apt_repositories_rendered_sources['git-core-ppa'] | default(false)
     - apt_repositories_git_core_ppa_legacy_sources.matched | default(0) > 0
   tags:
+    - packages
+    - system
     - repos
     - git
 
@@ -143,9 +134,9 @@
   loop:
     - /etc/apt/sources.list.d/ppa_git_core_ppa_noble.list
     - /etc/apt/sources.list.d/ppa_git_core_ppa_resolute.list
-  when:
-    - ansible_facts['distribution'] in supported_distributions
-    - not common_selective_feature_run or common_enable_git_credential_oauth
+  when: apt_repositories_rendered_sources['git-core-ppa'] | default(false)
   tags:
+    - packages
+    - system
     - repos
     - git

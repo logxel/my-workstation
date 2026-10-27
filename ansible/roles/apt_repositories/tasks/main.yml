@@ -1,6 +1,25 @@
 ---
-- name: Remove obsolete managed APT source definitions
-  ansible.builtin.include_tasks: cleanup.yml
+- name: Reset repository replacement readiness for this role invocation
+  ansible.builtin.set_fact:
+    apt_repositories_rendered_sources: {}
+    apt_repositories_validated_downloads: {}
+  tags:
+    - always
+
+- name: Install GnuPG before validating external repository keys
+  ansible.builtin.apt:
+    name: gnupg
+    state: present
+    update_cache: false
+  when: >-
+    common_enable_vscode
+    or common_enable_edge
+    or common_enable_brave
+    or common_enable_docker
+    or common_enable_dev_tools
+    or common_enable_warp_terminal
+    or (ansible_facts['distribution'] in supported_distributions
+        and (not common_selective_feature_run or common_enable_git_credential_oauth))
   tags:
     - packages
     - system
@@ -13,7 +32,6 @@
     - nodejs
     - warp-terminal
     - git
-    - copyq
 
 - name: Ensure the APT keyrings directory exists
   ansible.builtin.file:
@@ -25,19 +43,24 @@
   when: >-
     common_enable_vscode
     or common_enable_edge
+    or common_enable_brave
     or common_enable_docker
     or common_enable_dev_tools
     or common_enable_warp_terminal
+    or (ansible_facts['distribution'] in supported_distributions
+        and (not common_selective_feature_run or common_enable_git_credential_oauth))
   tags:
     - packages
     - system
     - repos
     - vscode
     - edge
+    - brave
     - docker
     - dev-tools
     - nodejs
     - warp-terminal
+    - git
 
 - name: Install the Microsoft APT signing key into a dedicated keyring
   when: common_enable_vscode or common_enable_edge
@@ -49,13 +72,10 @@
     - edge
   block:
     - name: Fetch the Microsoft APT signing key
-      ansible.builtin.get_url:
-        url: https://packages.microsoft.com/keys/microsoft.asc
-        dest: /etc/apt/keyrings/microsoft.asc
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: "https://packages.microsoft.com/keys/microsoft.asc"
+        apt_key_dest: /etc/apt/keyrings/microsoft.asc
   rescue:
     - name: Warn when Microsoft APT signing key could not be refreshed
       ansible.builtin.debug:
@@ -108,13 +128,11 @@
     - brave
   block:
     - name: Fetch the Brave APT signing key
-      ansible.builtin.get_url:
-        url: https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-        dest: /etc/apt/keyrings/brave-browser-archive-keyring.gpg
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: "https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg"
+        apt_key_dest: /etc/apt/keyrings/brave-browser-archive-keyring.gpg
+        apt_key_fingerprint: "{{ brave_apt_key_fingerprints | join(',') }}"
   rescue:
     - name: Warn when Brave APT signing key could not be refreshed
       ansible.builtin.debug:
@@ -136,6 +154,7 @@
     apt_source_components: main
     apt_source_arch: "{{ common_deb_arch }}"
     apt_source_keyring: /etc/apt/keyrings/brave-browser-archive-keyring.gpg
+    apt_source_fingerprint: "{{ brave_apt_key_fingerprints | join(',') }}"
   when: common_enable_brave
   tags:
     - repos
@@ -150,13 +169,10 @@
     - docker
   block:
     - name: Fetch the Docker APT signing key
-      ansible.builtin.get_url:
-        url: https://download.docker.com/linux/ubuntu/gpg
-        dest: /etc/apt/keyrings/docker.asc
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+        apt_key_dest: /etc/apt/keyrings/docker.asc
   rescue:
     - name: Warn when Docker APT signing key could not be refreshed
       ansible.builtin.debug:
@@ -195,19 +211,10 @@
     - nodejs
   block:
     - name: Fetch the NodeSource APT signing key
-      ansible.builtin.get_url:
-        url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
-        dest: /tmp/nodesource-repo.asc
-        mode: "0644"
-        force: true
-
-    - name: Dearmor the NodeSource APT signing key into a binary keyring
-      ansible.builtin.shell:
-        cmd: >-
-          set -o pipefail;
-          gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource-repo.asc
-        executable: /bin/bash
-      changed_when: true
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+        apt_key_dest: /etc/apt/keyrings/nodesource.asc
 
     - name: Render the NodeSource repository definition
       ansible.builtin.include_tasks:
@@ -220,12 +227,12 @@
         apt_source_suites: nodistro
         apt_source_components: main
         apt_source_arch: "{{ common_deb_arch }}"
-        apt_source_keyring: /etc/apt/keyrings/nodesource.gpg
+        apt_source_keyring: /etc/apt/keyrings/nodesource.asc
   rescue:
     - name: Warn when the NodeSource APT repository could not be configured
       ansible.builtin.debug:
         msg: >-
-          WARNING: Could not configure the NodeSource APT repository (key fetch, dearmor, or
+          WARNING: Could not configure the NodeSource APT repository (key fetch or
           repo file render failed). Node.js package installs may fail later.
           Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
           | default('no error message provided') }}
@@ -240,19 +247,10 @@
     - warp-terminal
   block:
     - name: Fetch the Warp Terminal APT signing key
-      ansible.builtin.get_url:
-        url: "{{ warp_terminal_apt_key_url }}"
-        dest: /tmp/warpdotdev.asc
-        mode: "0644"
-        force: true
-
-    - name: Dearmor the Warp Terminal APT signing key into a binary keyring
-      ansible.builtin.shell:
-        cmd: >-
-          set -o pipefail;
-          gpg --batch --yes --dearmor -o /etc/apt/keyrings/warpdotdev.gpg /tmp/warpdotdev.asc
-        executable: /bin/bash
-      changed_when: true
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: "{{ warp_terminal_apt_key_url }}"
+        apt_key_dest: /etc/apt/keyrings/warpdotdev.asc
 
     - name: Render the Warp Terminal repository definition
       ansible.builtin.include_tasks:
@@ -265,12 +263,12 @@
         apt_source_suites: stable
         apt_source_components: main
         apt_source_arch: "{{ common_deb_arch }}"
-        apt_source_keyring: /etc/apt/keyrings/warpdotdev.gpg
+        apt_source_keyring: /etc/apt/keyrings/warpdotdev.asc
   rescue:
     - name: Warn when the Warp Terminal APT repository could not be configured
       ansible.builtin.debug:
         msg: >-
-          WARNING: Could not configure the Warp Terminal APT repository (key fetch, dearmor, or
+          WARNING: Could not configure the Warp Terminal APT repository (key fetch or
           repo file render failed). Warp Terminal package installs may fail later.
           Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
           | default('no error message provided') }}
@@ -287,14 +285,12 @@
     - git
   block:
     - name: Fetch the Git Core PPA signing key
-      ansible.builtin.get_url:
-        url: >-
+      ansible.builtin.import_tasks: install_key.yml
+      vars:
+        apt_key_url: >-
           https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF911AB184317630C59970973E363C90F8F1B6217
-        dest: /etc/apt/keyrings/git-core-ppa.asc
-        owner: root
-        group: root
-        mode: "0644"
-        force: true
+        apt_key_dest: /etc/apt/keyrings/git-core-ppa.asc
+        apt_key_fingerprint: F911AB184317630C59970973E363C90F8F1B6217
   rescue:
     - name: Warn when Git Core PPA signing key could not be refreshed
       ansible.builtin.debug:
@@ -324,6 +320,22 @@
     - repos
     - git
 
+- name: Remove obsolete managed APT source definitions after replacements are ready
+  ansible.builtin.include_tasks: cleanup.yml
+  tags:
+    - packages
+    - system
+    - repos
+    - vscode
+    - edge
+    - brave
+    - docker
+    - dev-tools
+    - nodejs
+    - warp-terminal
+    - git
+    - copyq
+
 - name: Update apt cache after adding external repositories
   when: >-
     common_enable_vscode
@@ -340,6 +352,14 @@
     - packages
     - system
     - repos
+    - vscode
+    - edge
+    - brave
+    - docker
+    - dev-tools
+    - nodejs
+    - warp-terminal
+    - git
   block:
     - name: Refresh the apt cache
       ansible.builtin.apt:

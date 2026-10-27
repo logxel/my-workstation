@@ -15,3 +15,4 @@ rules:
 ignore: |
   apm.lock.yaml
   apm_modules/
+  .venv/

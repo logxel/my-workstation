@@ -101,6 +101,17 @@ El contenedor existe únicamente para desarrollo y validación de la configuraci
 
 La imagen del DevContainer instala directamente `ansible-core`, `ansible-lint`, `yamllint` y Nix. Después, `postCreateCommand` solo añade `statix` y `nixpkgs-fmt` al perfil del usuario y ejecuta `nix flake check --impure` sobre `nix/`.
 
+Para preparar las herramientas de Ansible localmente con `uv` y `direnv`:
+
+```bash
+uv venv .venv
+uv pip install -r requirements-dev.txt
+direnv allow
+make lint-ansible
+```
+
+El `.envrc` activa el entorno al entrar en el directorio; no instala paquetes automáticamente. `make lint` también requiere las herramientas Nix descritas arriba.
+
 Si ya tenías el DevContainer creado antes de estos cambios, reconstruye el contenedor para que las herramientas nuevas queden disponibles en `PATH`.
 
 ## Validación manual

@@ -10,6 +10,31 @@
 #   apt_source_keyring    - Signed-By keyring file PATH (never an inline key block)
 - name: Render the APT repository definition for {{ apt_source_name }}
   block:
+    - name: Require a successful signing key refresh for {{ apt_source_name }}
+      ansible.builtin.assert:
+        that:
+          - apt_repositories_validated_downloads[apt_source_keyring] | default(false)
+        fail_msg: "Signing key refresh failed: {{ apt_source_keyring }}"
+
+    - name: Check the signing key for {{ apt_source_name }}
+      ansible.builtin.stat:
+        path: "{{ apt_source_keyring }}"
+      register: apt_repositories_source_key_stat
+
+    - name: Require a signing key for {{ apt_source_name }}
+      ansible.builtin.assert:
+        that:
+          - apt_repositories_source_key_stat.stat.isreg | default(false)
+          - apt_repositories_source_key_stat.stat.size | default(0) | int > 0
+        fail_msg: "Missing or empty signing key: {{ apt_source_keyring }}"
+
+    - name: Validate the signing key for {{ apt_source_name }}
+      ansible.builtin.script:
+        cmd: >-
+          {{ role_path }}/files/validate_apt_key.py {{ apt_source_keyring | quote }}
+          {{ apt_source_keyring | quote }} {{ apt_source_fingerprint | default('') | quote }}
+      changed_when: false
+
     - name: Write the repository definition for {{ apt_source_name }}
       ansible.builtin.copy:
         dest: "/etc/apt/sources.list.d/{{ apt_source_name }}.sources"
@@ -30,6 +55,10 @@
                if apt_source_arch is defined and apt_source_arch | length > 0
                else '' }}
           - "Signed-By: {{ apt_source_keyring }}"
+    - name: Record the rendered replacement for {{ apt_source_name }}
+      ansible.builtin.set_fact:
+        apt_repositories_rendered_sources: >-
+          {{ apt_repositories_rendered_sources | default({}) | combine({apt_source_name: true}) }}
   rescue:
     - name: Warn when the repository definition could not be rendered for {{ apt_source_name }}
       ansible.builtin.debug:

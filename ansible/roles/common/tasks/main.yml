@@ -264,17 +264,31 @@
           - nix_install_mode in ['single-user', 'multi-user']
         fail_msg: nix_install_mode must be single-user or multi-user.
 
+    - name: Read host OS release metadata
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: common_os_release
+
+    - name: Validate host architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['architecture'] in deb_arch_map
+        fail_msg: "Unsupported host architecture: {{ ansible_facts['architecture'] }}"
+
     - name: Gather installed package facts
       ansible.builtin.package_facts:
         manager: auto
 
     - name: Derive host package and platform facts
       ansible.builtin.set_fact:
-        common_deb_arch: "{{ deb_arch_map.get(ansible_facts['architecture'], 'amd64') }}"
+        common_deb_arch: "{{ deb_arch_map[ansible_facts['architecture']] }}"
         common_ubuntu_codename: >-
           {{
-            ansible_facts.get('lsb', {}).get('codename')
-            | default(ansible_facts['distribution_release'], true)
+            (common_os_release.content | b64decode
+             | regex_findall('(?m)^UBUNTU_CODENAME="?([a-z]+)"?$')
+             | first)
+            | default(ansible_facts['distribution_release']
+                      if ansible_facts['distribution'] == 'Ubuntu' else '', true)
           }}
         common_host_nix_system: "{{ nix_system_map.get(ansible_facts['architecture'], 'x86_64-linux') }}"
         common_nix_profiles_dir: "{{ local_home }}/.local/state/nix/profiles"
@@ -333,6 +347,13 @@
             | trim
           }}
         common_is_pop_desktop_host: "{{ ansible_facts['distribution'] == 'Pop!_OS' }}"
+
+    - name: Validate the Ubuntu repository codename
+      ansible.builtin.assert:
+        that:
+          - common_ubuntu_codename is match('^[a-z]+$')
+          - common_ubuntu_codename not in ['unknown', 'n/a']
+        fail_msg: "Cannot determine an Ubuntu repository codename: {{ common_ubuntu_codename }}"
 
     - name: Resolve the Git Credential Manager release metadata
       ansible.builtin.import_tasks: resolve_release_package.yml
@@ -414,7 +435,8 @@
             + ([ 'org.mozilla.Thunderbird' ] if common_feature_mode_thunderbird != 'disabled' else [])
           }}
         common_enable_rustup: "{{ common_feature_mode_rustup != 'disabled' }}"
-        common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled' or common_feature_mode_gem_team != 'disabled' }}"
+        common_enable_ai_tools: "{{ common_feature_mode_ai_tools != 'disabled'
+          or common_feature_mode_gem_team != 'disabled' }}"
         common_enable_gem_team: "{{ common_feature_mode_gem_team != 'disabled' }}"
         common_enable_dev_tools: "{{ common_feature_mode_dev_tools != 'disabled' }}"
         common_enable_warp_terminal: "{{ common_feature_mode_warp_terminal != 'disabled' }}"

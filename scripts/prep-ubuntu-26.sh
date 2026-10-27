@@ -17,6 +17,18 @@
 
 set -Eeuo pipefail
 
+# This script uses Ubuntu's release-upgrader workflow, not Pop!_OS's.
+if [[ ! -r /etc/os-release ]]; then
+  echo "Cannot identify the operating system; refusing to continue." >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. /etc/os-release
+if [[ "${ID:-}" != ubuntu || "${VERSION_ID:-}" != 24.04 ]]; then
+  echo "This preparation script is only for Ubuntu 24.04, not ${PRETTY_NAME:-this system}." >&2
+  exit 1
+fi
+
 STAMP="$(date +%F-%H%M)"
 # Create the destination as the invoking user with mode 0600 before sudo tar
 # writes it, so APT source credentials are not exposed to other local users.
@@ -30,8 +42,11 @@ trap 'printf "\n\033[31mFAILED: line %s, exit %s\033[0m\n" "$LINENO" "$?" >&2' E
 sudo -v
 
 step "1/5  Backing up apt + update-manager configuration"
-sudo tar czf "$BACKUP" \
-  /etc/apt/sources.list /etc/apt/sources.list.d /etc/update-manager
+BACKUP_PATHS=(/etc/apt/sources.list.d /etc/update-manager)
+if [[ -e /etc/apt/sources.list ]]; then
+  BACKUP_PATHS+=(/etc/apt/sources.list)
+fi
+sudo tar czf "$BACKUP" "${BACKUP_PATHS[@]}"
 echo "  backup: $BACKUP"
 
 step "2/5  Applying pending package updates"

@@ -46,53 +46,73 @@
     - clipboard-history
     - copyq
 
-- name: Download clipboard-history install script
-  ansible.builtin.get_url:
-    url: >-
-      https://raw.githubusercontent.com/axellpadilla/clipboard-history/{{
-        clipboard_history_branch
-      }}/install-with-cargo-systemd.sh
-    dest: /tmp/install-ringboard.sh
-    mode: "0755"
-  tags:
-    - clipboard-history
-
-- name: Patch upstream install script to tolerate missing services on first run
-  ansible.builtin.lineinfile:
-    path: /tmp/install-ringboard.sh
-    regexp: '^systemctl --user stop ringboard-server$'
-    line: 'systemctl --user stop ringboard-server 2>/dev/null || true'
+- name: Create temporary directory for Ringboard installer
+  ansible.builtin.tempfile:
+    state: directory
+    prefix: ringboard-install-
+  register: system_ringboard_install_temp
+  become: false
+  when: not ansible_check_mode
   tags:
     - clipboard-history
 
 - name: Install Ringboard with Iced GUI via official install script
+  when: not ansible_check_mode
   tags:
     - clipboard-history
   block:
-    - name: Run the Ringboard official install script
-      ansible.builtin.command:
-        cmd: /tmp/install-ringboard.sh
-      environment:
-        RINGBOARD_CLIENT: iced
-        RINGBOARD_REPO: axellpadilla/clipboard-history
-        RINGBOARD_BRANCH: "{{ clipboard_history_branch }}"
-        PATH: "{{ local_home }}/.cargo/bin:{{ lookup('env', 'PATH') }}"
-        XDG_SESSION_TYPE: "{{ lookup('ansible.builtin.env', 'XDG_SESSION_TYPE') }}"
-        XDG_CURRENT_DESKTOP: "{{ lookup('ansible.builtin.env', 'XDG_CURRENT_DESKTOP') }}"
-        DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
-        DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
-        XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+    - name: Download clipboard-history install script
+      ansible.builtin.get_url:
+        url: >-
+          https://raw.githubusercontent.com/axellpadilla/clipboard-history/{{
+            clipboard_history_branch
+          }}/install-with-cargo-systemd.sh
+        dest: "{{ system_ringboard_install_temp.path }}/install-ringboard.sh"
+        mode: "0755"
       become: false
-      changed_when: true
-  rescue:
-    - name: Warn when Ringboard install script fails
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: Could not install Ringboard via the official script.
-          Bootstrap will continue without failing this optional feature.
-          Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
-          | default('no error message provided') }}
-      changed_when: false
+
+    - name: Patch upstream install script to tolerate missing services on first run
+      ansible.builtin.lineinfile:
+        path: "{{ system_ringboard_install_temp.path }}/install-ringboard.sh"
+        regexp: '^systemctl --user stop ringboard-server$'
+        line: 'systemctl --user stop ringboard-server 2>/dev/null || true'
+      become: false
+
+    - name: Run optional Ringboard installer
+      block:
+        - name: Run the Ringboard official install script
+          ansible.builtin.command:
+            cmd: "{{ system_ringboard_install_temp.path }}/install-ringboard.sh"
+            chdir: "{{ system_ringboard_install_temp.path }}"
+          environment:
+            HOME: "{{ local_home }}"
+            CARGO_HOME: "{{ local_home }}/.cargo"
+            RINGBOARD_CLIENT: iced
+            RINGBOARD_REPO: axellpadilla/clipboard-history
+            RINGBOARD_BRANCH: "{{ clipboard_history_branch }}"
+            PATH: "{{ local_home }}/.cargo/bin:{{ lookup('env', 'PATH') }}"
+            XDG_SESSION_TYPE: "{{ lookup('ansible.builtin.env', 'XDG_SESSION_TYPE') }}"
+            XDG_CURRENT_DESKTOP: "{{ lookup('ansible.builtin.env', 'XDG_CURRENT_DESKTOP') }}"
+            DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+            DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+            XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+          become: false
+          changed_when: true
+      rescue:
+        - name: Warn when Ringboard install script fails
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not install Ringboard via the official script.
+              Bootstrap will continue without failing this optional feature.
+              Details: {{ ansible_failed_result.stderr | default(ansible_failed_result.msg)
+              | default('no error message provided') }}
+          changed_when: false
+  always:
+    - name: Remove temporary Ringboard installer directory
+      ansible.builtin.file:
+        path: "{{ system_ringboard_install_temp.path }}"
+        state: absent
+      become: false
 
 - name: Remove stale egui desktop entry (install script only keeps the active client)
   ansible.builtin.file:

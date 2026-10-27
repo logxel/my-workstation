@@ -19,7 +19,7 @@ deb_arch_map:
 nix_system_map:
   x86_64: x86_64-linux
   amd64: x86_64-linux
-  # aarch64: aarch64-linux
+  aarch64: aarch64-linux
   arm64: aarch64-linux
 # Baseline defaults. Local overrides can define only the keys they need in override.yml.
 feature_flags_defaults:
@@ -181,6 +181,12 @@ nix_home_manager_profile_name: my-workstation-home-manager
 nix_cleanup_generation_max_age_days: 30
 nodesource_major_version: "24"
 warp_terminal_apt_key_url: https://releases.warp.dev/linux/keys/warp.asc
+# Brave currently publishes three primary keys for signing-key rotation.
+# Unknown new primary keys are rejected until this allowlist is reviewed.
+brave_apt_key_fingerprints:
+  - DBF1A116C220B8C7164F98230686B78420038257
+  - 47D32A74E9A9E013A4B4926C68D513D36A73CD96
+  - B2A3DCA350E67256740DF904DE4EC67BE4B0DCA0
 oh_my_zsh_theme: robbyrussell
 oh_my_zsh_plugins:
   - git

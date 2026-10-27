@@ -24,7 +24,11 @@
     - name: Record configured swap paths owned by this role
       ansible.builtin.set_fact:
         swap_owned_paths: "{{ swap_ownership_markers.results
+          | selectattr('stat.exists', 'defined')
+          | selectattr('stat.exists')
+          | selectattr('stat.isreg', 'defined')
           | selectattr('stat.isreg')
+          | selectattr('stat.pw_name', 'defined')
           | selectattr('stat.pw_name', 'equalto', 'root')
           | map(attribute='item')
           | list }}"
@@ -202,10 +206,8 @@
     - name: Check if current swap needs migration
       ansible.builtin.set_fact:
         swap_needs_migration: "{{ swap_current is none
-          or (
-            swap_current in swap_owned_paths
-            and (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576
-          ) }}"
+          or (swap_current in swap_owned_paths
+            and (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576) }}"
 
     - name: Determine next swap path for rotation
       ansible.builtin.set_fact:

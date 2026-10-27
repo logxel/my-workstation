@@ -20,20 +20,6 @@
     - name: Manage APT repositories
       ansible.builtin.include_role:
         name: apt_repositories
-        apply:
-          tags:
-            - repos
-            - vscode
-            - edge
-            - brave
-            - docker
-            - git
-            - copyq
-            - dev-tools
-            - nodejs
-            - warp-terminal
-            - system
-            - packages
       when: common_run_role_apt_repositories
       tags:
         - repos

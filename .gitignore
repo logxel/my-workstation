@@ -13,6 +13,7 @@
 # Local shell environment state
 /.direnv/
 /.envrc.local
+/.venv/
 
 # Editor swap and backup files
 *.swp
