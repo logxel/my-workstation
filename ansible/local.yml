@@ -48,6 +48,7 @@
             - shell
       when: common_run_role_system
       tags:
+        - inotify
         - vscode
         - git
         - openvpn
