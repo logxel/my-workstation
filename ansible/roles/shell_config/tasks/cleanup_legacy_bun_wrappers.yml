@@ -1,4 +1,9 @@
 ---
+# Revisions before 1c52848 deployed Bun compatibility wrappers in ~/.local/bin,
+# and some hosts also carry a "node" shim that forwards to bun. A `node` shim
+# breaks anything with a `#!/usr/bin/env node` shebang (pnpm, npm itself), so it
+# is removed too -- but only when it is a small script that execs bun, never a
+# real Node binary someone keeps in ~/.local/bin.
 - name: Check which legacy Bun compat wrappers exist
   ansible.builtin.stat:
     path: "{{ local_home }}/.local/bin/{{ item }}"
@@ -26,12 +31,64 @@
   tags:
     - migrate
 
+- name: Check whether a legacy node shim exists
+  ansible.builtin.stat:
+    path: "{{ local_home }}/.local/bin/node"
+  register: shell_config_legacy_node
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - migrate
+
+- name: Read the legacy node shim
+  ansible.builtin.slurp:
+    src: "{{ local_home }}/.local/bin/node"
+  register: shell_config_legacy_node_content
+  become: true
+  become_user: "{{ local_user }}"
+  when:
+    - shell_config_legacy_node.stat.exists | bool
+    - shell_config_legacy_node.stat.isreg | bool
+    - (shell_config_legacy_node.stat.size | int) < 4096
+  tags:
+    - migrate
+
+- name: Record whether the node shim forwards to Bun
+  ansible.builtin.set_fact:
+    shell_config_legacy_node_is_shim: >-
+      {{
+        (shell_config_legacy_node.stat.exists | bool)
+        and (shell_config_legacy_node.stat.isreg | bool)
+        and ((shell_config_legacy_node.stat.size | int) < 4096)
+        and (
+          (shell_config_legacy_node_content.content | default('') | b64decode)
+          is search('(?m)^exec\s+.*bun')
+        )
+      }}
+  tags:
+    - migrate
+
+- name: Remove the legacy node shim when it only forwards to Bun
+  ansible.builtin.file:
+    path: "{{ local_home }}/.local/bin/node"
+    state: absent
+  become: true
+  become_user: "{{ local_user }}"
+  when: shell_config_legacy_node_is_shim | default(false) | bool
+  tags:
+    - migrate
+
 - name: Report legacy Bun compat wrapper cleanup
   ansible.builtin.debug:
     msg: >-
-      Removed legacy Bun compat wrappers ({{ local_home }}/.local/bin/{npm,npx,yarn,pnpm})
-      -- npm/npx now come from the nodejs apt package; yarn/pnpm are no longer aliased.
-  when: shell_config_legacy_wrapper_stat.results | selectattr('stat.exists') | list | length > 0
+      Removed legacy Bun compatibility shims from {{ local_home }}/.local/bin
+      ({{ (shell_config_legacy_wrapper_stat.results | selectattr('stat.exists') | map(attribute='item') | list
+          + (['node'] if shell_config_legacy_node_is_shim | default(false) | bool else []))
+        | join(', ') | default('none', true) }}). npm/npx come from the nodejs apt
+      package and node no longer resolves to Bun.
+  when: >-
+    (shell_config_legacy_wrapper_stat.results | selectattr('stat.exists') | list | length > 0)
+    or (shell_config_legacy_node_is_shim | default(false) | bool)
   changed_when: false
   tags:
     - migrate
