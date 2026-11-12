@@ -33,16 +33,15 @@ while (($# > 0)); do
   esac
 done
 
-sudo -v
-
-while true; do
-  sudo -n true
-  sleep 60
-  kill -0 "$$" || exit
-done 2>/dev/null &
-SUDO_KEEPALIVE_PID=$!
-trap 'kill "${SUDO_KEEPALIVE_PID}"' EXIT
-
+# Ansible's worker process calls setsid() and reopens stdio on /dev/null before
+# running a task, so become runs in a session with no controlling terminal.
+# sudo then keys its credential cache by parent PID instead of by tty, which
+# never matches a record created by an interactive "sudo -v" in the caller's
+# terminal. Without a become password the plugin also appends -n, so sudo
+# cannot prompt and the play dies in Gathering Facts with
+#     sudo: a password is required
+# Warming the cache is therefore useless; ask for the password once and let
+# Ansible feed it to become (-K also strips the plugin's -n flag).
 missing_packages=()
 
 command -v git >/dev/null 2>&1 || missing_packages+=(git)
@@ -113,4 +112,4 @@ if [[ -n "${ONLY_FEATURES}" ]]; then
   ANSIBLE_ARGS+=(--extra-vars "dotfiles_only_features=${ONLY_FEATURES}")
 fi
 
-ansible-playbook ansible/local.yml "${ANSIBLE_ARGS[@]}"
+ansible-playbook ansible/local.yml "${ANSIBLE_ARGS[@]}" --ask-become-pass

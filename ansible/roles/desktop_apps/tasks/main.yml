@@ -182,17 +182,25 @@
         - "'flatpak' in ansible_facts.packages"
         - desktop_apps_rustdesk_flatpak_info.rc == 0
 
+    - name: Ensure the upstream package cache directory exists
+      ansible.builtin.file:
+        path: "{{ workstation_package_cache_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Download the resolved RustDesk Debian package
       ansible.builtin.get_url:
         url: "{{ common_rustdesk_deb_url }}"
-        dest: "/tmp/{{ common_rustdesk_package_filename }}"
+        dest: "{{ workstation_package_cache_dir }}/{{ common_rustdesk_package_filename }}"
         mode: "0644"
         force: false
         checksum: "{{ common_rustdesk_deb_checksum if common_rustdesk_deb_checksum | length > 0 else omit }}"
 
     - name: Install RustDesk from the resolved upstream Debian package
       ansible.builtin.apt:
-        deb: "/tmp/{{ common_rustdesk_package_filename }}"
+        deb: "{{ workstation_package_cache_dir }}/{{ common_rustdesk_package_filename }}"
         state: present
         update_cache: true
 

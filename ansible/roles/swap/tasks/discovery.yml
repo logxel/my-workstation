@@ -1,0 +1,131 @@
+---
+# Shared discovery prelude: runs regardless of feature state so both branches
+# use the same verified view. A swap signature proves file type, not ownership;
+# only files with a root-owned role marker — or the pre-marker default paths
+# listed in swap_legacy_managed_paths — may be rotated or removed.
+- name: Discover swap state
+  tags:
+    - swap
+  block:
+    - name: Identify swap-file paths managed by this role
+      ansible.builtin.set_fact:
+        swap_path_alt: "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
+        swap_ownership_marker_suffix: ".my-workstation-managed"
+        swap_managed_paths:
+          - "{{ swap_file_path }}"
+          - "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
+
+    # Older revisions of this role predate the ownership marker, so swap files
+    # they created carry no claim. Inheriting that claim only for the paths that
+    # were their defaults keeps upgraded hosts managed; a custom swap_file_path
+    # never inherits it, and the path must still look like a swap file (active
+    # or blkid signature) before it can be removed.
+    - name: Derive the legacy ownership claim for pre-marker default paths
+      ansible.builtin.set_fact:
+        swap_legacy_owned_paths: "{{ swap_managed_paths
+          | select('in', swap_legacy_managed_paths | default([]))
+          | list }}"
+
+    - name: Inspect role ownership markers for configured swap paths
+      ansible.builtin.stat:
+        path: "{{ item }}{{ swap_ownership_marker_suffix }}"
+        follow: false
+      loop: "{{ swap_managed_paths }}"
+      register: swap_ownership_markers
+
+    - name: Record configured swap paths owned by this role
+      ansible.builtin.set_fact:
+        swap_owned_paths: >-
+          {{
+            (
+              (
+                swap_ownership_markers.results
+                | selectattr('stat.exists', 'defined')
+                | selectattr('stat.exists')
+                | selectattr('stat.isreg', 'defined')
+                | selectattr('stat.isreg')
+                | selectattr('stat.pw_name', 'defined')
+                | selectattr('stat.pw_name', 'equalto', 'root')
+                | map(attribute='item')
+                | list
+              )
+              + (swap_legacy_owned_paths | default([]))
+            ) | unique
+          }}
+
+    - name: Read active swap entries from proc
+      ansible.builtin.command:
+        cmd: cat /proc/swaps
+      register: swap_proc
+      changed_when: false
+
+    - name: Read fstab contents
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: swap_fstab
+
+    - name: Identify active file swaps and fstab swap paths
+      ansible.builtin.set_fact:
+        swap_active_files: "{{ swap_proc.stdout_lines[1:]
+          | select('search', '\\sfile\\s')
+          | map('split')
+          | map('first')
+          | list }}"
+        swap_fstab_files: "{{ (swap_fstab.content | b64decode).splitlines()
+          | map('regex_replace', '^\\s*#\\s*', '')
+          | map('trim')
+          | reject('equalto', '')
+          | select('search', '^\\S+\\s+\\S+\\s+swap\\s')
+          | map('split')
+          | map('first')
+          | select('match', '^/')
+          | reject('match', '^/dev/')
+          | list
+          | unique }}"
+
+    - name: Build swap candidate list
+      ansible.builtin.set_fact:
+        swap_candidates: "{{ (swap_active_files + swap_fstab_files + swap_managed_paths)
+          | unique
+          | select('in', swap_managed_paths)
+          | list }}"
+
+    - name: Stat swap candidates
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ swap_candidates }}"
+      register: swap_candidates_stat
+
+    - name: Select inactive regular-file candidates
+      ansible.builtin.set_fact:
+        swap_inactive_regular: "{{ swap_candidates_stat.results
+          | default([])
+          | selectattr('stat.exists')
+          | selectattr('stat.isreg')
+          | map(attribute='item')
+          | list
+          | difference(swap_active_files) }}"
+
+    - name: Probe inactive swap candidates for swap signature
+      ansible.builtin.command:
+        cmd: blkid -p -o value -s TYPE "{{ item }}"
+      loop: "{{ swap_inactive_regular }}"
+      register: swap_probe
+      changed_when: false
+      ignore_errors: true  # noqa: ignore-errors
+
+    - name: Collect signature-verified swap files
+      ansible.builtin.set_fact:
+        swap_sig_files: "{{ swap_probe.results
+          | default([])
+          | selectattr('stdout', 'defined')
+          | selectattr('stdout', 'search', '^swap')
+          | map(attribute='item')
+          | list }}"
+
+    - name: Compute verified swap removal set
+      ansible.builtin.set_fact:
+        swap_verified_removals: "{{ (swap_active_files + swap_sig_files)
+          | unique
+          | select('in', swap_owned_paths)
+          | list }}"

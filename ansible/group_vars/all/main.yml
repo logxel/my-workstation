@@ -2,6 +2,10 @@
 local_user: "{{ lookup('ansible.builtin.env', 'USER') }}"
 local_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
 dotfiles_repo: "{{ local_home }}/my-workstation"
+# Root-owned cache for upstream .deb files that are installed by path. Keeping
+# them out of /tmp means a reboot does not force a re-download and reinstall of
+# the same package on the next bootstrap.
+workstation_package_cache_dir: /var/cache/workstation/packages
 supported_distributions:
   - Ubuntu
   - Pop!_OS
@@ -160,6 +164,12 @@ docker_daemon_config:
 # docker_prune_old_image_store is explicitly enabled. Set to "overlay2" only
 # when a host needs the classic store or to roll back.
 docker_image_store: containerd
+# Opt-in switch: changing the image store stops every running container,
+# restarts the daemon and hides the current store's containers/images until they
+# are recreated. `docker_image_store` alone only states the desired store, so a
+# routine bootstrap never disrupts a live devcontainer. Set this to true for a
+# single run to perform the migration (and to roll back after a migration).
+docker_image_store_switch_approved: false
 # Seconds that "docker stop" waits for each running container before SIGKILL
 # when the image store switch stops the workloads. The 10s Docker default can
 # cut a stateful service (for example MongoDB/WiredTiger) checkpoint short, so
@@ -176,6 +186,35 @@ vscode_file_manager_integration: auto
 # swap files; pre-existing files are left untouched unless explicitly adopted.
 swap_file_path: /swapfile
 swap_priority: 500
+# A managed swap file is only rotated when it drifts more than this percentage
+# from the size derived from installed RAM. The derived size moves by hundreds
+# of MiB when MemTotal moves (kernel reservations, iGPU/VRAM carving), and
+# rotating swap for that noise costs a full swapoff/swapon cycle on every run.
+swap_size_tolerance_percent: 5
+# Older revisions of this role managed swap files without an ownership marker.
+# These are the paths they defaulted to; keeping them in the managed set avoids
+# silently abandoning hosts provisioned by those revisions. The claim only
+# applies while they are still the configured paths (a custom swap_file_path
+# never inherits it) and the file must still be an active swap file or carry a
+# verified swap signature before it can be removed. Set to [] to require a
+# root-owned marker for every file.
+swap_legacy_managed_paths:
+  - /swapfile
+  - /swapfile.1
+# fs.inotify.max_user_instances is a per-real-UID cap shared by every watcher
+# the user runs (editors, language servers, browsers, devcontainers); the kernel
+# still defaults to 128. The system role sizes it from installed RAM as
+# clamp(RAM_GiB * inotify_instances_per_gib, floor, ceiling) and only raises a
+# value that is below half that target, so operator- or distro-managed higher
+# values are never lowered.
+inotify_instances_floor: 1024
+inotify_instances_ceiling: 8192
+inotify_instances_per_gib: 256
+# Single override point for the memory input: tests substitute it, the role
+# otherwise reads the gathered fact.
+inotify_instances_memtotal_mb: "{{ ansible_facts['memtotal_mb'] | default(0) }}"
+inotify_instances_proc_path: /proc/sys/fs/inotify/max_user_instances
+inotify_instances_sysctl_path: /etc/sysctl.d/99-inotify-instances.conf
 nix_install_mode: single-user
 nix_home_manager_profile_name: my-workstation-home-manager
 nix_cleanup_generation_max_age_days: 30

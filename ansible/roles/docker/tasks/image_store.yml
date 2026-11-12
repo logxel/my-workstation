@@ -11,10 +11,17 @@
 #          volume set, warn about containers/images that need a redeploy and,
 #          only when explicitly requested, delete the leftover overlay2 data.
 #
-# Rollback: set docker_image_store: overlay2 and re-run the playbook. The
-# containerd-snapshotter feature flag is removed from daemon.json, the daemon is
-# restarted onto the classic store and the old overlay2 data is still on disk
-# because it is only deleted when docker_prune_old_image_store is true.
+# Rollback: set docker_image_store: overlay2 and docker_image_store_switch_approved:
+# true, then re-run the playbook. The containerd-snapshotter feature flag is
+# removed from daemon.json, the daemon is restarted onto the classic store and
+# the old overlay2 data is still on disk because it is only deleted when
+# docker_prune_old_image_store is true.
+#
+# The migration itself is opt-in: docker_image_store states the desired store,
+# and docker_image_store_switch_approved must be true before anything is
+# stopped or rewritten. Without the approval the role reports the difference and
+# leaves the host untouched, so a routine bootstrap never stops a live
+# devcontainer (or discards the containers/images of the current store).
 #
 # Image store paths follow the daemon's DockerRootDir (data-root), falling back
 # to /var/lib/docker when the daemon is down.
@@ -100,12 +107,22 @@
       ansible.builtin.set_fact:
         docker_image_store_target_driver: "{{ 'overlay2' if docker_image_store == 'overlay2' else 'overlayfs' }}"
 
+    # A store migration stops every running container, restarts the daemon and
+    # hides the current store's containers/images, so it is never implied by
+    # `docker_image_store` alone: it also needs explicit approval. Without the
+    # approval the role only reports the difference and leaves the host alone.
     - name: Decide whether the image store must change
       ansible.builtin.set_fact:
+        docker_image_store_switch_requested: >-
+          {{
+            (docker_image_store_daemon_up | default(false) | bool)
+            and (docker_current_driver | default('')) != docker_image_store_target_driver
+          }}
         docker_image_store_switch: >-
           {{
             (docker_image_store_daemon_up | default(false) | bool)
             and (docker_current_driver | default('')) != docker_image_store_target_driver
+            and (docker_image_store_switch_approved | default(false) | bool)
           }}
 
     # When containerd is already active, do not add a redundant feature flag:
@@ -129,7 +146,21 @@
           (storage driver '{{ docker_current_driver }}'); nothing to change.
       when:
         - docker_image_store_daemon_up | default(false) | bool
-        - not (docker_image_store_switch | bool)
+        - not (docker_image_store_switch_requested | bool)
+
+    - name: Warn when an image store migration is requested but not approved
+      ansible.builtin.debug:
+        msg: >-
+          The Docker daemon uses the '{{ docker_current_driver }}' storage driver but
+          docker_image_store asks for '{{ docker_image_store }}'
+          ('{{ docker_image_store_target_driver }}'). Migrating stops every running
+          container, restarts Docker and hides the current store's containers and
+          images until they are recreated, so it is opt-in: nothing was changed.
+          Re-run with docker_image_store_switch_approved=true to migrate, or set
+          docker_image_store to '{{ docker_current_driver }}' to silence this warning.
+      when:
+        - docker_image_store_switch_requested | bool
+        - not (docker_image_store_switch_approved | default(false) | bool)
 
     - name: Reject an untested Docker storage driver
       ansible.builtin.fail:
@@ -147,7 +178,9 @@
       ansible.builtin.stat:
         path: /var/lib/containerd
       register: docker_containerd_store_dir
-      when: docker_image_store == 'containerd'
+      when:
+        - docker_image_store == 'containerd'
+        - docker_image_store_switch | bool
 
     - name: Create the containerd image store directory only when missing
       ansible.builtin.file:
@@ -156,6 +189,7 @@
         mode: "0711"
       when:
         - docker_image_store == 'containerd'
+        - docker_image_store_switch | bool
         - not (docker_containerd_store_dir.stat.exists | default(false))
 
     # Read-only inventory, captured before anything is stopped or changed.

@@ -93,13 +93,17 @@
   tags:
     - nix
 
+# Guard on the Nix store database, not on ~/.nix-profile/bin/nix: once Home
+# Manager owns ~/.nix-profile the link points at a user-environment that does not
+# ship the nix binary, so the old guard never matched and the upstream installer
+# reinstalled Nix (new profile generation, network fetch) on every bootstrap.
 - name: Install Nix with the upstream single-user installer
   become: false
   ansible.builtin.shell: |
     set -Eeuo pipefail
     curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
   args:
-    creates: "{{ local_home }}/.nix-profile/bin/nix"
+    creates: /nix/var/nix/db/db.sqlite
     executable: /bin/bash
   when:
     - common_enable_nix

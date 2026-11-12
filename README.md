@@ -54,7 +54,7 @@ dotfiles/
 El playbook usa roles pequeños y etiquetados para que puedas ejecutar solo una parte del aprovisionamiento:
 
 - `common`: validación del host y facts compartidos.
-- `system`: paquetes base, herramientas de escritorio y shell por defecto.
+- `system`: paquetes base, herramientas de escritorio, shell por defecto y el límite de instancias de `inotify` dimensionado por RAM.
 - `apt_repositories`: repositorios y llaves APT de proveedores.
 - `desktop_apps`: instalación de VS Code, Brave y RustDesk nativo.
 - `virt_manager`: stack de virtualización local con libvirt y virt-manager.
@@ -76,6 +76,7 @@ Ejemplos:
 ansible-playbook ansible/local.yml --tags docker
 ansible-playbook ansible/local.yml --tags virt-manager
 ansible-playbook ansible/local.yml --tags nix,file-manager
+ansible-playbook ansible/local.yml --tags inotify
 ansible-playbook ansible/apt-clean.yml
 ansible-playbook ansible/nix-clean.yml
 ansible-playbook ansible/nix-migrate-single-user.yml
@@ -128,6 +129,12 @@ yamllint .
 DOTFILES_USER="$USER" DOTFILES_HOME="$HOME" NIX_SYSTEM="$(nix eval --impure --raw --expr builtins.currentSystem)" nix --extra-experimental-features "nix-command flakes" flake check --impure ./nix
 ```
 
+Los tests de `tests/` ejercitan la lógica derivada (migración de repositorios APT, instalador de Ringboard y la fórmula del límite de instancias `inotify`) contra directorios y ficheros temporales, sin tocar el host:
+
+```bash
+python3 -m unittest discover -s tests -t tests -v
+```
+
 El `Makefile` expone también objetivos separados:
 
 - `make lint-ansible`
@@ -174,7 +181,7 @@ Los componentes opcionales están controlados desde `ansible/group_vars/all/main
 - `feature_flags.file_manager_integration` usa `auto` por defecto y solo habilita la integración si VS Code también está habilitado.
 - `feature_flags.git_credential_oauth` migra la autenticación HTTP(S) de Git a Git Credential Manager, instalado desde un `.deb` upstream fijado por versión y checksum para Ubuntu y Pop!_OS.
 - La configuración global de Git pasa a usar `credential.helper=/usr/local/bin/git-credential-manager` y `credential.credentialStore=secretservice`, de modo que los tokens quedan persistidos en el keyring del escritorio y sobreviven reinicios.
-- Si el host tiene una sesión GNOME, Pop o COSMIC y habilitas VS Code o Git Credential Manager, el playbook instala `gnome-keyring` para que exista un proveedor Secret Service/libsecret y no aparezca el warning de keyring en VS Code.
+- Si el host tiene una sesión GNOME, Pop o COSMIC y habilitas VS Code o Git Credential Manager, el playbook instala `gnome-keyring` para que exista un proveedor Secret Service/libsecret y no aparezca el warning de keyring en VS Code. El rol nunca reinicia un `gnome-keyring-daemon` que ya sirve `org.freedesktop.secrets`: reemplazarlo perdería la colección `login` desbloqueada y el escritorio (y el almacenamiento seguro de VS Code) pediría la contraseña del keyring. Solo lo arranca cuando la sesión no expone el servicio.
 - El playbook elimina `git-credential-oauth` y mantiene el repositorio estable de git-core en Ubuntu y Pop!_OS para instalar una versión upstream reciente de Git, compatible con Git Credential Manager.
 - Los repositorios APT gestionados directamente por este repo (Microsoft, Brave, Docker, NodeSource, Warp Terminal y git-core) se declaran en formato deb822 como `/etc/apt/sources.list.d/<repo>.sources`, con keyrings dedicados bajo `/etc/apt/keyrings`. `Signed-By` apunta siempre a la ruta de un keyring, nunca a una clave inline: el upgrader de Ubuntu trunca las claves inline de los ficheros deb822 al preparar un salto de release. El rol escribe el `.sources` y retira el `.list` de una línea equivalente, de modo que `apt` nunca vea el mismo repositorio dos veces; las tareas de retirada llevan las mismas etiquetas que su tarea de escritura, así que una ejecución por `--tags` no puede borrar un origen sin reescribir su reemplazo. El flujo `apt-clean` conserva esa misma limpieza de definiciones legacy para evitar entradas duplicadas o avisos por `trusted.gpg` en `apt`.
 - `apt_base_packages` incluye `ripgrep` (antes también se instalaba por duplicado vía Home Manager; ahora `rg` viene solo de APT).
@@ -192,10 +199,12 @@ Los componentes opcionales están controlados desde `ansible/group_vars/all/main
 - `openvpn_core_packages` define la base mínima de OpenVPN.
 - `openvpn_network_manager_packages` define el backend adicional que solo se instala cuando el modo `auto` detecta `network-manager` o cuando fuerzas `feature_flags.openvpn=enabled`.
 - `virt_manager_default_uri` define la URI por defecto que usará virt-manager/libvirt en `~/.config/libvirt/libvirt.conf`.
-- `docker_image_store` acepta `containerd` (por defecto) o `overlay2` (modo clásico). Al migrar desde `overlay2`, el rol activa el image store moderno de containerd (que `docker info` reporta como driver `overlayfs`) mediante `features.containerd-snapshotter`. Si containerd ya está activo, no se fuerza esa clave redundante ni se considera una migración. Los hosts que aún usan `overlay2` se migran durante el aprovisionamiento: el rol comprueba espacio, detiene los contenedores en ejecución de forma ordenada y conserva los datos antiguos salvo que se habilite explícitamente `docker_prune_old_image_store`.
+- `docker_image_store` acepta `containerd` (por defecto) o `overlay2` (modo clásico) y solo declara el store deseado: no migra nada por sí solo. La migración (que `docker info` reporta como driver `overlayfs` cuando el destino es `containerd`) requiere además `docker_image_store_switch_approved: true` en `ansible/group_vars/all/override.yml` o `--extra-vars`. Sin esa aprobación el rol solo avisa de la diferencia y deja el host intacto, de modo que un `make bootstrap` rutinario nunca detiene un devcontainer en marcha ni oculta los contenedores/imágenes del store actual. Con la aprobación, el rol comprueba espacio, detiene los contenedores en ejecución de forma ordenada, activa `features.containerd-snapshotter` y conserva los datos antiguos salvo que se habilite explícitamente `docker_prune_old_image_store`. Si containerd ya está activo, no se fuerza esa clave redundante ni se considera una migración.
 - `docker_prune_old_image_store` está desactivado por defecto y es irreversible: solo borra los datos del store `overlay2` que quedan atrás cuando el driver ya es `overlayfs` y ningún layer `overlay2` sigue montado.
 - `docker_image_store_stop_timeout` (60 s por defecto) es el tiempo que se concede a los contenedores en ejecución para parar de forma ordenada antes del cambio de image store.
-- Los archivos de swap preexistentes solo se redimensionan o eliminan si tienen un marcador root-owned `<swap_file_path>.my-workstation-managed`; el rol añade ese marcador a los archivos que crea. Para adoptar un archivo existente, comprueba primero que es propiedad de este rol y crea el marcador manualmente. Sin marcador, el playbook conserva el swap existente, incluso si desactivas la feature.
+- Los archivos de swap preexistentes solo se redimensionan o eliminan si tienen un marcador root-owned `<swap_file_path>.my-workstation-managed`; el rol añade ese marcador a los archivos que crea. Para adoptar un archivo existente, comprueba primero que es propiedad de este rol y crea el marcador manualmente. Sin marcador, el playbook conserva el swap existente, incluso si desactivas la feature. Las rutas que eran el valor por defecto antes de que existiera el marcador (`swap_legacy_managed_paths`: `/swapfile` y `/swapfile.1`) se siguen considerando gestionadas para no abandonar hosts aprovisionados por revisiones antiguas; ese heredero solo aplica mientras sigan siendo las rutas configuradas y el fichero sea un swap activo o con firma verificada. Vacía la lista para exigir marcador en todos los casos.
+- El tamaño del swap se deriva de la RAM instalada (ratio 2.0 por debajo de 8 GiB, 1.5 por debajo de 16, 0.75 por debajo de 32 y 0.5 por encima, con mínimo de 4096 MiB y máximo de 32768 MiB). Solo se rota cuando el tamaño activo difiere del objetivo en más de `swap_size_tolerance_percent` (5 % por defecto): MemTotal varía cientos de MiB entre kernels por reservas del firmware y de la iGPU, y rotar por ese ruido cuesta un ciclo `swapoff`/`swapon` en cada ejecución.
+- El rol `system` dimensiona `fs.inotify.max_user_instances` como `clamp(RAM_GiB × inotify_instances_per_gib, inotify_instances_floor, inotify_instances_ceiling)`, con 1024–8192 y 256 por GiB por defecto. Solo sube el valor cuando el actual está **por debajo de la mitad** del objetivo, así que nunca rebaja un ajuste del operador o de la distro. Los GiB se redondean al entero más cercano: un host que reporta 29,7 GiB dimensiona como 30 GiB (7680 instancias). El resultado se persiste en `inotify_instances_sysctl_path` y se aplica con `sysctl -p` sobre ese fichero, sin reaplicar el resto de sysctls del sistema. El límite es por UID real, no por máquina, y en hosts donde ya vale al menos la mitad del objetivo la tarea no hace nada.
 
 Para instalar el perfil nativo de NetworkManager con los ajustes de split tunnel y split DNS validados en este host, usa:
 
@@ -218,7 +227,7 @@ El modo `auto` de `clipboard_history` se comporta así:
 
 - Si ya está instalado `ringboard-server`, `ringboard-iced`, `copyq` u otro gestor de portapapeles conocido como `gpaste`, `klipper`, `diodon`, `cliphist`, `clipman`, `xfce4-clipman` o un applet de portapapeles para COSMIC, no instala nada adicional.
 - Si `clip-win` está instalado, lo desinstala automáticamente y migra a Ringboard.
-- Si no detecta ningún gestor, ejecuta el script oficial `install-with-cargo-systemd.sh` del fork `axellpadilla/clipboard-history` con `RINGBOARD_CLIENT=iced`, que descarga los binarios precompilados, instala los servicios systemd de usuario y arranca el servidor junto con el watcher de sesión.
+- Si no detecta ningún gestor, ejecuta el script oficial `install-with-cargo-systemd.sh` del fork `axellpadilla/clipboard-history` con `RINGBOARD_CLIENT=iced`, que descarga los binarios precompilados, instala los servicios systemd de usuario y arranca el servidor junto con el watcher de sesión. El script solo se ejecuta cuando falta `~/.cargo/bin/ringboard-server`: reejecutarlo en cada `make bootstrap` paraba `ringboard-server` y dejaba el portapapeles sin servicio. Para reinstalar o actualizar, borra ese binario (o ejecuta el script a mano).
 - En COSMIC además precrea la entrada de `Super+V` en el fichero de shortcuts y configura `COSMIC_DATA_CONTROL_ENABLED=1` para el soporte de portapapeles en Wayland; en GNOME/Pop!_OS intenta registrar el custom shortcut vía `gsettings` y libera tanto `toggle-message-tray` como `toggle-quick-settings` cuando hay una sesión DBus disponible.
 
 El modo legacy de CopyQ se comporta así:
@@ -258,7 +267,9 @@ Las herramientas de escritorio GNOME se comportan así:
 - Warp Terminal se instala desde el repositorio APT oficial (`releases.warp.dev`), no desde Flatpak (no publican uno) ni desde Nix.
 - `bootstrap.sh` exige `ansible-core` 2.20 o superior cuando el `python3` del host es 3.14+, porque `ansible-core` solo soporta Python 3.14 a partir de 2.20 y las versiones anteriores fallan dentro de la primera tarea con un traceback que no explica la causa. El mínimo es **2.20** y no el 2.21 que fija la imagen del DevContainer: Ubuntu 26.04 trae `ansible-core` 2.20.1 como paquete del sistema, mientras que el DevContainer lo instala por pip y puede permitirse el más reciente. En 24.04 el chequeo no se activa, porque su `ansible-core` 2.16.3 funciona contra el Python 3.12 de esa release.
 - La imagen del DevContainer fija además `ansible-lint>=26.8.0` y `yamllint>=1.38.0`. `yamllint` solo declara soporte de Python 3.14 desde 1.38.0, así que dejarlo sin cota podía resolver a una versión que no funciona en la base 26.04.
-- Ubuntu 26.04 convierte a `sudo-rs` en el `sudo` por defecto, pero mantiene el `sudo` clásico como `/usr/bin/sudo.ws` a través del grupo de alternativas `sudo`. El plugin `become` de Ansible con método `sudo` detecta el prompt de contraseña con una coincidencia por prefijo de línea, y `sudo-rs` renderiza el prompt de `-p` como `[sudo: <prompt>] Password:` en lugar de `<prompt>`; como esa coincidencia nunca se cumple, `become` falla con `Timed out waiting for become success or become password prompt`. Es un bug conocido de upstream (ansible/ansible#85837) sin corrección en ninguna versión publicada de `ansible-core` a día de hoy — los backports se revirtieron y el arreglo solo existe en `devel`. El repositorio usa `scripts/ansible-become-sudo`: prefiere el `sudo.ws` clásico en Ubuntu 26.04 y retrocede a `/usr/bin/sudo` en Pop!_OS/Ubuntu donde `sudo.ws` no existe, sin cambiar la alternativa por defecto del sistema. Además, `sudo-rs` prohíbe los comodines en los argumentos de comandos de sudoers, y por eso la limpieza del journal se ejecuta mediante el wrapper sin argumentos `/usr/local/sbin/workstation-journal-vacuum`.
+- Ubuntu 26.04 convierte a `sudo-rs` en el `sudo` por defecto, pero mantiene el `sudo` clásico como `/usr/bin/sudo.ws` a través del grupo de alternativas `sudo`. El plugin `become` de Ansible con método `sudo` detecta el prompt de contraseña con una coincidencia por prefijo de línea, y `sudo-rs` renderiza el prompt de `-p` como `[sudo: <prompt>] Password:` en lugar de `<prompt>`; como esa coincidencia nunca se cumple, `become` falla con `Timed out waiting for become success or become password prompt`. Es el bug upstream ansible/ansible#85837: a fecha 2026-10-29 ninguna versión estable lo corrige (2.20.10 y 2.21.5 siguen fallando) y el arreglo —`check_password_prompt()` acepta también `[sudo: <prompt>] Password:`, con soporte de locales— solo está en los release candidates publicados el 2026-10-27: `2.20.11rc1`, `2.21.6rc1` y `2.22.0rc2`. Se esperan las finales `2.20.11`/`2.21.6` hacia el 2026-11-03 y la `2.22.0` hacia el 2026-11-10. El repositorio usa `scripts/ansible-become-sudo`: prefiere el `sudo.ws` clásico en Ubuntu 26.04 y retrocede a `/usr/bin/sudo` en Pop!_OS/Ubuntu donde `sudo.ws` no existe, sin cambiar la alternativa por defecto del sistema. Además, `sudo-rs` prohíbe los comodines en los argumentos de comandos de sudoers, y por eso la limpieza del journal se ejecuta mediante el wrapper sin argumentos `/usr/local/sbin/workstation-journal-vacuum`.
+
+  **Siguiente actualización de Ansible (pendiente):** cuando `ansible-core` sea `>=2.20.11` o `>=2.21.6` estable (2.22 exige Python >=3.13), elimina el workaround: borra la sección `[privilege_escalation]` de `ansible.cfg`, `scripts/ansible-become-sudo` y `ansible_become_exe` en `ansible/group_vars/all/main.yml`, y sube el suelo en `requirements-dev.txt`/`.devcontainer/Dockerfile` si quieres que el DevContainer rechace versiones sin el arreglo. Conserva `--ask-become-pass` en `bootstrap.sh`: el worker de Ansible hace `setsid()` y `become` corre sin TTY, así que sudo indexa su caché por PPID y nunca reutiliza el timestamp de un `sudo -v` interactivo.
 
 ## Migración desde Home Manager
 
@@ -286,7 +297,7 @@ Si el host ya corrió una versión anterior de este mismo repo (no de Home Manag
 - `feature_flags.virt_manager`, `virt_manager_packages` y `virt_manager_default_uri` si quieres ajustar el stack de virtualización local.
 - Los `feature_flags`, `distro_flatpak_apps` y el modo de integración del gestor de archivos en `ansible/group_vars/all/main.yml`.
 - `feature_flags.openvpn`, `openvpn_core_packages` y `openvpn_network_manager_packages` si quieres ajustar cuándo se instala el backend de OpenVPN y evitar dependencias de NetworkManager cuando no hagan falta.
-- `docker_image_store: overlay2` solo si necesitas volver al image store clásico. El cambio entre stores reinicia Docker y puede ocultar los contenedores/imágenes del store anterior hasta redeplegarlos; el rol conserva los datos antiguos salvo que se habilite explícitamente la poda.
+- `docker_image_store: overlay2` junto con `docker_image_store_switch_approved: true` solo si necesitas volver al image store clásico (o `docker_image_store: containerd` con la misma aprobación para migrar desde `overlay2`). El cambio entre stores reinicia Docker y puede ocultar los contenedores/imágenes del store anterior hasta redeplegarlos; el rol conserva los datos antiguos salvo que se habilite explícitamente la poda.
 
 Para aprovisionar solo OpenVPN y sus paquetes relacionados:
 

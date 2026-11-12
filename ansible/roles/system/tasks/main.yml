@@ -169,17 +169,28 @@
     - system
     - git
   block:
+    # Cache upstream .deb files outside /tmp so a reboot does not re-download and
+    # reinstall them on every bootstrap. The filename embeds the resolved
+    # version, so a new release lands on a new path.
+    - name: Ensure the upstream package cache directory exists
+      ansible.builtin.file:
+        path: "{{ workstation_package_cache_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Download the pinned Git Credential Manager Debian package
       ansible.builtin.get_url:
         url: "{{ common_gcm_deb_url }}"
-        dest: "/tmp/{{ common_gcm_package_filename }}"
+        dest: "{{ workstation_package_cache_dir }}/{{ common_gcm_package_filename }}"
         mode: "0644"
         force: false
         checksum: "{{ common_gcm_deb_checksum if common_gcm_deb_checksum | length > 0 else omit }}"
 
     - name: Install Git Credential Manager from the pinned upstream Debian package
       ansible.builtin.apt:
-        deb: "/tmp/{{ common_gcm_package_filename }}"
+        deb: "{{ workstation_package_cache_dir }}/{{ common_gcm_package_filename }}"
         state: present
         update_cache: true
 
@@ -193,12 +204,31 @@
       become: true
       become_user: "{{ local_user }}"
 
+    # Replacing a running gnome-keyring-daemon drops the unlocked login
+    # collection, so the desktop (and Chromium/VS Code Safe Storage, which read
+    # the same keyring) immediately pop a "keyring password" dialog. Only
+    # (re)start the daemon when the session bus has no Secret Service provider at
+    # all; when one is already serving org.freedesktop.secrets, leave it and its
+    # unlocked collection alone.
     - name: Restart gnome-keyring-daemon to ensure clean D-Bus secret service session
       when:
         - lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') | length > 0
         - common_enable_secret_service
       block:
-        - name: Restart gnome-keyring-daemon
+        - name: Check whether the session bus exposes the Secret Service
+          ansible.builtin.command:
+            cmd: busctl --user --no-legend list
+          register: system_secret_service_bus
+          changed_when: false
+          failed_when: false
+          become: true
+          become_user: "{{ local_user }}"
+          environment:
+            DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
+            DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
+            XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+
+        - name: Restart gnome-keyring-daemon only when the Secret Service is missing
           ansible.builtin.shell:
             cmd: >-
               gnome-keyring-daemon -r -d
@@ -211,6 +241,21 @@
             DBUS_SESSION_BUS_ADDRESS: "{{ lookup('ansible.builtin.env', 'DBUS_SESSION_BUS_ADDRESS') }}"
             DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') }}"
             XDG_RUNTIME_DIR: "{{ lookup('ansible.builtin.env', 'XDG_RUNTIME_DIR') }}"
+          when: >-
+            (system_secret_service_bus.rc | default(1)) == 0
+            and 'org.freedesktop.secrets'
+              not in (system_secret_service_bus.stdout | default(''))
+
+        - name: Warn when the Secret Service state cannot be inspected
+          ansible.builtin.debug:
+            msg: >-
+              WARNING: Could not inspect the session bus with 'busctl --user list', so
+              gnome-keyring-daemon was left running untouched. Restarting a daemon that
+              already serves org.freedesktop.secrets would drop the unlocked login
+              collection and make the desktop ask for the keyring password.
+              Details: {{ system_secret_service_bus.stderr | default('no error message provided') }}
+          changed_when: false
+          when: (system_secret_service_bus.rc | default(1)) != 0
       rescue:
         - name: Warn when gnome-keyring-daemon restart fails
           ansible.builtin.debug:
@@ -297,3 +342,10 @@
   when: common_install_copyq
   tags:
     - copyq
+
+# Per-user inotify instance limit sized from installed RAM
+- name: Include inotify instance limit tasks
+  ansible.builtin.import_tasks: inotify.yml
+  tags:
+    - inotify
+    - system

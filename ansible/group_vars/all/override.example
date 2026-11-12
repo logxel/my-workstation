@@ -12,6 +12,12 @@ feature_flags:
 # Docker Engine, migrate ~/.docker/config.json, and remove Docker Desktop state.
 # docker_desktop_cleanup_approved: true
 
+# Set to true for a single run to migrate the Docker image store (overlay2
+# <-> containerd). It stops every running container, restarts Docker and hides
+# the current store's containers/images until they are recreated, so a routine
+# `make bootstrap` leaves the host untouched without this approval.
+# docker_image_store_switch_approved: true
+
 # Optional swap overrides.
 # swap_file_path: /swapfile
 # swap_priority: 500

@@ -1,0 +1,61 @@
+---
+# fs.inotify.max_user_instances is a per-real-UID cap shared by every watcher
+# the user runs: each editor, language server, browser and devcontainer opens at
+# least one instance, while the kernel still defaults to 128. Size it from
+# installed RAM, but raise only a value that is below half the target so an
+# operator- or distro-managed higher value is never lowered.
+- name: Ensure the inotify instance knobs are coherent
+  ansible.builtin.assert:
+    that:
+      - inotify_instances_floor | int > 0
+      - inotify_instances_ceiling | int >= inotify_instances_floor | int
+      - inotify_instances_per_gib | int > 0
+    fail_msg: >-
+      inotify_instances_floor must be greater than 0, inotify_instances_ceiling
+      must be greater than or equal to inotify_instances_floor, and
+      inotify_instances_per_gib must be greater than 0.
+  tags:
+    - inotify
+    - system
+
+- name: Derive the inotify instance limit
+  ansible.builtin.import_tasks: inotify_derive.yml
+  tags:
+    - inotify
+    - system
+
+- name: Report the inotify instance limit decision
+  ansible.builtin.debug:
+    msg: >-
+      RAM {{ system_inotify_instances_ram_gib }} GiB → target {{ system_inotify_instances_target }} instances;
+      current {{ system_inotify_instances_current }};
+      {{ 'raising to target' if system_inotify_instances_apply else 'leaving unchanged (current >= half target)' }}
+  changed_when: false
+  tags:
+    - inotify
+    - system
+
+- name: Raise the per-user inotify instance limit
+  when: system_inotify_instances_apply | bool
+  tags:
+    - inotify
+    - system
+  block:
+    - name: Persist the inotify instance limit in sysctl.d
+      ansible.builtin.copy:
+        dest: "{{ inotify_instances_sysctl_path }}"
+        content: |
+          # Managed by my-workstation (ansible/roles/system/tasks/inotify.yml).
+          # fs.inotify.max_user_instances is sized from installed RAM and is only
+          # raised when the running value is below half the derived target.
+          fs.inotify.max_user_instances = {{ system_inotify_instances_target }}
+        owner: root
+        group: root
+        mode: "0644"
+
+    # Only this repo-owned file is reapplied, so unrelated vendor sysctls are
+    # never re-evaluated as a side effect.
+    - name: Apply the inotify instance limit to the running kernel
+      ansible.builtin.command:
+        cmd: sysctl -p {{ inotify_instances_sysctl_path }}
+      changed_when: true

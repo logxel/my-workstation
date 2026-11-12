@@ -169,7 +169,9 @@
     - docker
 
 # Keep the immediate pre-write file so a config dockerd rejects can be restored
-# without a manual rollback. Idempotent: an identical copy reports no change.
+# without a manual rollback. Only copy when the effective configuration differs:
+# an identical config leaves both files alone instead of rewriting the backup on
+# every run and reporting a spurious change.
 - name: Back up the current Docker daemon configuration before writing
   ansible.builtin.copy:
     src: /etc/docker/daemon.json
@@ -179,6 +181,7 @@
   when:
     - common_enable_docker | default(false)
     - docker_daemon_file.stat.exists
+    - docker_daemon_effective_config != docker_daemon_existing_config
   tags:
     - docker
 

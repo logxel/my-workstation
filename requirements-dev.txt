@@ -1,3 +1,6 @@
+# Once released, raise to >=2.21.6 (or >=2.20.11): that is the first version
+# with the sudo-rs become prompt fix (ansible/ansible#85837) that lets
+# ansible.cfg drop its become_exe workaround. See README "Decisiones técnicas".
 ansible-core>=2.21,<2.22
 ansible-lint>=26.8.0,<27
 yamllint>=1.38.0,<2

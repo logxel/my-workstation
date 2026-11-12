@@ -20,6 +20,9 @@
 *.swo
 *~
 
+# Python bytecode from the local test suite
+__pycache__/
+
 # OS metadata
 .DS_Store
 Thumbs.db

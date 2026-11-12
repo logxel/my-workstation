@@ -1,0 +1,45 @@
+---
+# Pure derivation for the inotify instance limit: reads the current kernel value
+# and computes the RAM-derived target. Kept separate from the apply block so
+# tests can exercise it against a fake inotify_instances_proc_path without
+# touching the running kernel (see tests/test_inotify_instances.py).
+- name: Read the current per-user inotify instance limit
+  ansible.builtin.slurp:
+    src: "{{ inotify_instances_proc_path }}"
+  register: system_inotify_instances_current_raw
+  changed_when: false
+  check_mode: false
+
+- name: Derive the current limit and installed RAM in whole GiB
+  ansible.builtin.set_fact:
+    system_inotify_instances_current: "{{ system_inotify_instances_current_raw.content | b64decode | trim | int }}"
+    # Round to nearest, matching `awk 'printf "%.0f", <kB>/1024/1024'`: a host
+    # reporting 29.7 GiB sizes for 30 GiB. Flooring would give 29 GiB / 7424.
+    system_inotify_instances_ram_gib: >-
+      {{
+        (
+          ((inotify_instances_memtotal_mb | default(0)) | int / 1024)
+          | round(0, 'common')
+        ) | int
+      }}
+
+- name: Derive the inotify instance target from installed RAM
+  ansible.builtin.set_fact:
+    system_inotify_instances_target: >-
+      {{
+        [
+          [
+            inotify_instances_floor | int,
+            (system_inotify_instances_ram_gib | int) * (inotify_instances_per_gib | int)
+          ] | max,
+          inotify_instances_ceiling | int
+        ] | min
+      }}
+
+- name: Decide whether the inotify instance limit needs raising
+  ansible.builtin.set_fact:
+    system_inotify_instances_apply: >-
+      {{
+        (system_inotify_instances_current | int)
+        < ((system_inotify_instances_target | int) // 2)
+      }}

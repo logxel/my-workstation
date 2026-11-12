@@ -1,114 +1,9 @@
 ---
-# Shared discovery prelude: runs regardless of feature state so both branches
-# use the same verified view. A swap signature proves file type, not ownership;
-# only files with a root-owned role marker may be rotated or removed.
+# Discovery prelude lives in discovery.yml so it can be exercised read-only.
 - name: Discover swap state
+  ansible.builtin.import_tasks: discovery.yml
   tags:
     - swap
-  block:
-    - name: Identify swap-file paths managed by this role
-      ansible.builtin.set_fact:
-        swap_path_alt: "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
-        swap_ownership_marker_suffix: ".my-workstation-managed"
-        swap_managed_paths:
-          - "{{ swap_file_path }}"
-          - "{{ swap_file_path ~ '.1' if swap_file_path[-2:] != '.1' else swap_file_path[:-2] }}"
-
-    - name: Inspect role ownership markers for configured swap paths
-      ansible.builtin.stat:
-        path: "{{ item }}{{ swap_ownership_marker_suffix }}"
-        follow: false
-      loop: "{{ swap_managed_paths }}"
-      register: swap_ownership_markers
-
-    - name: Record configured swap paths owned by this role
-      ansible.builtin.set_fact:
-        swap_owned_paths: "{{ swap_ownership_markers.results
-          | selectattr('stat.exists', 'defined')
-          | selectattr('stat.exists')
-          | selectattr('stat.isreg', 'defined')
-          | selectattr('stat.isreg')
-          | selectattr('stat.pw_name', 'defined')
-          | selectattr('stat.pw_name', 'equalto', 'root')
-          | map(attribute='item')
-          | list }}"
-
-    - name: Read active swap entries from proc
-      ansible.builtin.command:
-        cmd: cat /proc/swaps
-      register: swap_proc
-      changed_when: false
-
-    - name: Read fstab contents
-      ansible.builtin.slurp:
-        src: /etc/fstab
-      register: swap_fstab
-
-    - name: Identify active file swaps and fstab swap paths
-      ansible.builtin.set_fact:
-        swap_active_files: "{{ swap_proc.stdout_lines[1:]
-          | select('search', '\\sfile\\s')
-          | map('split')
-          | map('first')
-          | list }}"
-        swap_fstab_files: "{{ (swap_fstab.content | b64decode).splitlines()
-          | map('regex_replace', '^\\s*#\\s*', '')
-          | map('trim')
-          | reject('equalto', '')
-          | select('search', '^\\S+\\s+\\S+\\s+swap\\s')
-          | map('split')
-          | map('first')
-          | select('match', '^/')
-          | reject('match', '^/dev/')
-          | list
-          | unique }}"
-
-    - name: Build swap candidate list
-      ansible.builtin.set_fact:
-        swap_candidates: "{{ (swap_active_files + swap_fstab_files + swap_managed_paths)
-          | unique
-          | select('in', swap_managed_paths)
-          | list }}"
-
-    - name: Stat swap candidates
-      ansible.builtin.stat:
-        path: "{{ item }}"
-      loop: "{{ swap_candidates }}"
-      register: swap_candidates_stat
-
-    - name: Select inactive regular-file candidates
-      ansible.builtin.set_fact:
-        swap_inactive_regular: "{{ swap_candidates_stat.results
-          | default([])
-          | selectattr('stat.exists')
-          | selectattr('stat.isreg')
-          | map(attribute='item')
-          | list
-          | difference(swap_active_files) }}"
-
-    - name: Probe inactive swap candidates for swap signature
-      ansible.builtin.command:
-        cmd: blkid -p -o value -s TYPE "{{ item }}"
-      loop: "{{ swap_inactive_regular }}"
-      register: swap_probe
-      changed_when: false
-      ignore_errors: true  # noqa: ignore-errors
-
-    - name: Collect signature-verified swap files
-      ansible.builtin.set_fact:
-        swap_sig_files: "{{ swap_probe.results
-          | default([])
-          | selectattr('stdout', 'defined')
-          | selectattr('stdout', 'search', '^swap')
-          | map(attribute='item')
-          | list }}"
-
-    - name: Compute verified swap removal set
-      ansible.builtin.set_fact:
-        swap_verified_removals: "{{ (swap_active_files + swap_sig_files)
-          | unique
-          | select('in', swap_owned_paths)
-          | list }}"
 
 - name: Calculate swap file size from available RAM
   when: common_enable_swap | default(false)
@@ -136,12 +31,27 @@
       ansible.builtin.set_fact:
         swap_size_mb: "{{ [swap_size_mb | int, 32768] | min }}"
 
+    # Rotating a healthy swap file because MemTotal moved by a few hundred MiB
+    # (kernel reservations, iGPU/VRAM carving) costs a full swapoff/swapon cycle
+    # on every run, so compare against a relative tolerance instead.
+    - name: Derive the swap size tolerance in bytes
+      ansible.builtin.set_fact:
+        swap_size_tolerance_bytes: >-
+          {{
+            (
+              (swap_size_mb | int) * 1048576
+              * (swap_size_tolerance_percent | float) / 100
+            ) | int
+          }}
+
     - name: Report planned swap file
       ansible.builtin.debug:
         msg: >-
           RAM {{ ansible_facts['memtotal_mb'] | int // 1024 }} GiB →
           swap ratio {{ swap_ratio }} → swap file {{ swap_size_mb }} MiB
-          at {{ swap_file_path }} (priority {{ swap_priority }})
+          at {{ swap_file_path }} (priority {{ swap_priority }}) →
+          rotation tolerance {{ (swap_size_tolerance_bytes | int / 1048576) | round(1) }} MiB
+          ({{ swap_size_tolerance_percent }}%)
 
 - name: Teardown swap when feature is disabled
   when: not (common_enable_swap | default(false))
@@ -176,7 +86,7 @@
 
     - name: Confirm teardown
       ansible.builtin.debug:
-        msg: "Swap disabled — removed only swap files marked as managed by this role"
+        msg: "Swap disabled — removed only swap files owned by this role (marker or pre-marker default path)"
 
 - name: Setup swap file when feature is enabled
   when: common_enable_swap | default(false)
@@ -207,7 +117,8 @@
       ansible.builtin.set_fact:
         swap_needs_migration: "{{ swap_current is none
           or (swap_current in swap_owned_paths
-            and (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs) >= 1048576) }}"
+            and (((swap_current_size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs)
+              >= (swap_size_tolerance_bytes | int)) }}"
 
     - name: Determine next swap path for rotation
       ansible.builtin.set_fact:
@@ -223,12 +134,14 @@
       ansible.builtin.fail:
         msg: >-
           Refusing to remove {{ swap_current }} because {{ swap_next }} is already
-          active but does not match the requested {{ swap_size_mb }} MiB size.
+          active but does not match the requested {{ swap_size_mb }} MiB size
+          (tolerance {{ swap_size_tolerance_percent }}%).
           Resolve the alternate swap manually before retrying.
       when:
         - swap_needs_migration
         - swap_next in swap_active_files
-        - ((swap_next_stat.stat.size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs >= 1048576
+        - ((swap_next_stat.stat.size | int) - ((swap_size_mb | int) * 1024 * 1024)) | abs
+          >= (swap_size_tolerance_bytes | int)
 
     - name: Refuse to overwrite an unowned or unverified file at the swap target
       ansible.builtin.fail:
@@ -257,6 +170,7 @@
           - "Final: {{ swap_final }}"
           - "Removals: {{ swap_removals }}"
           - "Migration needed: {{ swap_needs_migration }}"
+          - "Owned paths: {{ swap_owned_paths }} (legacy unmarked: {{ swap_legacy_owned_paths }})"
 
     - name: Migrate swap with zero-downtime rotation
       when: swap_needs_migration

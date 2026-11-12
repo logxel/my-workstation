@@ -52,6 +52,7 @@
     prefix: ringboard-install-
   register: system_ringboard_install_temp
   become: false
+  changed_when: false
   when: not ansible_check_mode
   tags:
     - clipboard-history
@@ -70,6 +71,7 @@
         dest: "{{ system_ringboard_install_temp.path }}/install-ringboard.sh"
         mode: "0755"
       become: false
+      changed_when: false
 
     - name: Patch upstream install script to tolerate missing services on first run
       ansible.builtin.lineinfile:
@@ -77,13 +79,20 @@
         regexp: '^systemctl --user stop ringboard-server$'
         line: 'systemctl --user stop ringboard-server 2>/dev/null || true'
       become: false
+      changed_when: false
 
     - name: Run optional Ringboard installer
       block:
+        # The upstream script rebuilds the binaries, stops ringboard-server and
+        # rewrites the user units, so a routine bootstrap must not re-run it: it
+        # used to leave the clipboard service stopped on every provisioning run.
+        # Reinstall/upgrade by removing this binary (or by running the upstream
+        # script by hand).
         - name: Run the Ringboard official install script
           ansible.builtin.command:
             cmd: "{{ system_ringboard_install_temp.path }}/install-ringboard.sh"
             chdir: "{{ system_ringboard_install_temp.path }}"
+            creates: "{{ local_home }}/.cargo/bin/ringboard-server"
           environment:
             HOME: "{{ local_home }}"
             CARGO_HOME: "{{ local_home }}/.cargo"
@@ -113,6 +122,7 @@
         path: "{{ system_ringboard_install_temp.path }}"
         state: absent
       become: false
+      changed_when: false
 
 - name: Remove stale egui desktop entry (install script only keeps the active client)
   ansible.builtin.file:
