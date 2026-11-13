@@ -52,6 +52,7 @@
   tags:
     - shell-config
     - cleanup-timer
+    - cleanup-timer-root
 
 - name: Deploy sudoers drop-in for workstation auto-clean
   ansible.builtin.template:
@@ -65,6 +66,7 @@
   tags:
     - shell-config
     - cleanup-timer
+    - cleanup-timer-root
 
 - name: Ensure ~/.local/bin exists
   ansible.builtin.file:
@@ -80,6 +82,19 @@
   ansible.builtin.template:
     src: workstation-auto-clean.sh.j2
     dest: "{{ local_home }}/.local/bin/workstation-auto-clean"
+    owner: "{{ local_user }}"
+    group: "{{ local_user }}"
+    mode: "0755"
+  become: true
+  become_user: "{{ local_user }}"
+  tags:
+    - shell-config
+    - cleanup-timer
+
+- name: Deploy the VS Code Dev Container cache-pruning helper
+  ansible.builtin.copy:
+    src: workstation-vscode-cache-prune.py
+    dest: "{{ local_home }}/.local/bin/workstation-vscode-cache-prune.py"
     owner: "{{ local_user }}"
     group: "{{ local_user }}"
     mode: "0755"

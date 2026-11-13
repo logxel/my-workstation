@@ -56,6 +56,84 @@ run_if_available() {
   fi
 }
 
+prune_vscode_cache() {
+  local helper_image="{{ workstation_cleanup_vscode_cache_helper_image }}"
+  local helper_script="$HOME/.local/bin/workstation-vscode-cache-prune.py"
+  local running_containers running_container process_list active_commits commit config
+  local -a protected_commits=()
+{% for commit in workstation_cleanup_vscode_server_protected_commits %}
+  protected_commits+=(--protect-commit {{ commit }})
+{% endfor %}
+
+  if ! docker volume inspect vscode >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! running_containers="$(docker ps --filter volume=vscode -q 2>/dev/null)"; then
+    printf 'Skipping VS Code cache cleanup: could not check volume users.\n' >&2
+    return 0
+  fi
+  # Preserve commits actually executing from the shared volume. A mounted
+  # volume alone does not make unrelated, aged cache entries or old builds
+  # active; the helper applies age/retention rules to those candidates.
+  for running_container in $running_containers; do
+    if ! process_list="$(docker top "$running_container" 2>/dev/null)"; then
+      printf 'Skipping VS Code cache cleanup: could not inspect processes in %s.\n' \
+        "$running_container" >&2
+      return 0
+    fi
+    active_commits="$(grep -Eo '/vscode/vscode-server/bin/[^/]+/[0-9a-f]{40}' <<< "$process_list" \
+      | sed -E 's@.*/@@' | sort -u || true)"
+    while IFS= read -r commit; do
+      [[ -n "$commit" ]] && protected_commits+=(--protect-commit "$commit")
+    done <<< "$active_commits"
+  done
+
+  if [[ ! -r "$helper_script" ]]; then
+    printf 'Skipping VS Code cache cleanup: helper script is unavailable.\n' >&2
+    return 0
+  fi
+  if ! docker image inspect "$helper_image" >/dev/null 2>&1; then
+    printf 'Pulling pinned VS Code cache helper image: %s\n' "$helper_image"
+    if ! docker pull "$helper_image"; then
+      printf 'Skipping VS Code cache cleanup: helper image could not be retrieved.\n' >&2
+      return 0
+    fi
+  fi
+
+  if [[ ! -d "$HOME/workspaces" ]]; then
+    printf 'Skipping VS Code cache cleanup: workspace root is missing; cannot verify MCP pins.\n' >&2
+    return 0
+  fi
+  local config_list
+  config_list="$(find "$HOME/workspaces" -type f -path '*/.vscode/mcp.json' -print 2>/dev/null)" || {
+    printf 'Skipping VS Code cache cleanup: MCP config discovery failed.\n' >&2
+    return 0
+  }
+  while IFS= read -r config; do
+    [[ -n "$config" ]] || continue
+    if [[ ! -r "$config" ]]; then
+      printf 'Skipping VS Code cache cleanup: MCP config is unreadable: %s\n' "$config" >&2
+      return 0
+    fi
+    local referenced_commits
+    referenced_commits="$(grep -Eho 'vscode-server/bin/[^/]+/[0-9a-f]{40}' "$config" 2>/dev/null | sed -E 's@.*/@@' || true)"
+    while IFS= read -r commit; do
+      [[ -n "$commit" ]] && protected_commits+=(--protect-commit "$commit")
+    done <<< "$referenced_commits"
+  done <<< "$config_list"
+
+  docker run --rm --pull=never --network none --read-only --security-opt=no-new-privileges \
+    --mount 'type=volume,source=vscode,target=/vscode' \
+    --mount "type=bind,source=${helper_script},target=/prune.py,readonly" \
+    "$helper_image" python3 /prune.py --root /vscode/vscode-server \
+    --extension-cache-max-age-days {{ workstation_cleanup_vscode_extension_cache_max_age_days }} \
+    --server-max-age-days {{ workstation_cleanup_vscode_server_max_age_days }} \
+    --keep-latest {{ workstation_cleanup_vscode_server_keep_latest }} \
+    --require-protected-commit --apply "${protected_commits[@]}" \
+    || printf 'VS Code cache cleanup failed; continuing other workstation cleanup.\n' >&2
+}
+
 {% raw %}
 # Remove containers that have been STOPPED for more than N days.
 #
@@ -103,6 +181,7 @@ run_if_available nix-collect-garbage nix-collect-garbage --delete-older-than {{ 
 # age; builder-cache `until` uses last-use age.
 if command -v docker >/dev/null 2>&1; then
   prune_idle_containers {{ workstation_cleanup_docker_container_max_age_days }}
+  prune_vscode_cache
   run_if_available docker docker image prune -af --filter "until={{ (workstation_cleanup_docker_image_max_age_days | int) * 24 }}h"
   run_if_available docker docker network prune -f --filter "until={{ (workstation_cleanup_docker_network_max_age_days | int) * 24 }}h"
   run_if_available docker docker builder prune -af --filter "until={{ (workstation_cleanup_docker_build_cache_max_age_days | int) * 24 }}h"
