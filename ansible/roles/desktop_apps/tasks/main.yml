@@ -13,10 +13,11 @@
     - vscode
     - brave
 
-- name: Install Warp Terminal from its official repository
+# Warp is intentionally kept current when this provisioning feature runs.
+- name: Install Warp Terminal from its official repository # noqa: package-latest
   ansible.builtin.apt:
     name: warp-terminal
-    state: present
+    state: latest
     update_cache: true
   when: common_enable_warp_terminal
   tags:

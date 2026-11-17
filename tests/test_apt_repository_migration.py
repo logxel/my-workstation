@@ -35,7 +35,7 @@ class RepositoryMigrationTest(unittest.TestCase):
             sources.mkdir()
             keys = base / "keys"
             keys.mkdir()
-            for name in ("docker.list", "brave-browser-release.list", "git-core-ubuntu-ppa-noble.list"):
+            for name in ("docker.list", "brave-browser-release.list", "git-core-ubuntu-ppa-noble.list", "warpdotdev.list"):
                 (sources / name).write_text("legacy\n")
 
             # Only redirect paths and ownership; retain task logic and tags.
@@ -93,6 +93,12 @@ class RepositoryMigrationTest(unittest.TestCase):
             self.assertTrue((sources / "git-core-ppa.sources").exists())
             self.assertTrue((sources / "docker.list").exists())
 
+            # Warp's legacy .list entry must be removed only after its signed-by
+            # deb822 replacement is successfully rendered.
+            run([render("warpdotdev", key, ["warp-terminal"]), cleanup(["warp-terminal"])], "warp-terminal")
+            self.assertFalse((sources / "warpdotdev.list").exists())
+            self.assertTrue((sources / "warpdotdev.sources").exists())
+
     def test_role_tag_scope_and_invalid_download(self):
         with tempfile.TemporaryDirectory(prefix="workstation-role-test-") as tmp:
             base = Path(tmp)
@@ -118,17 +124,21 @@ class RepositoryMigrationTest(unittest.TestCase):
             text = text.replace(install_apt, '  ansible.builtin.debug:\n    msg: "MOCK_GNUPG_INSTALL"')
             text = text.replace(cache_apt, '      ansible.builtin.debug:\n        msg: "MOCK_APT_CACHE_REFRESH"')
             key = signing_key(base)
+            key_bytes = key.read_bytes()
             text = text.replace("https://download.docker.com/linux/ubuntu/gpg", key.as_uri())
             main.write_text(text)
             (sources / "docker.list").write_text("legacy docker\n")
             (sources / "brave-browser-release.list").write_text("legacy brave\n")
+            (sources / "warpdotdev.list").write_text("legacy warp\n")
+            (keys / "warpdotdev.asc").write_text("stale key\n")
             (keys / "hluk-copyq.gpg").write_text("preserve\n")
             original_play = yaml.safe_load((ROOT / "ansible/local.yml").read_text())[0]
             include = next(t for t in original_play["tasks"] if t["name"] == "Manage APT repositories")
             play = [{"hosts": "localhost", "connection": "local", "gather_facts": False,
-                     "vars": {"common_run_role_apt_repositories": True, "common_enable_docker": True,
+                      "vars": {"common_run_role_apt_repositories": True, "common_enable_docker": True,
                               "common_enable_brave": True, "common_enable_vscode": False, "common_enable_edge": False,
-                              "common_enable_dev_tools": False, "common_enable_warp_terminal": False,
+                              "common_enable_dev_tools": False, "common_enable_warp_terminal": True,
+                              "warp_terminal_apt_key_url": key.as_uri(),
                               "common_selective_feature_run": True, "common_enable_git_credential_oauth": False,
                               "common_deb_arch": "amd64", "common_ubuntu_codename": "noble",
                               "supported_distributions": ["Ubuntu"], "ansible_facts": {"distribution": "Ubuntu"}},
@@ -146,6 +156,11 @@ class RepositoryMigrationTest(unittest.TestCase):
             self.assertTrue((sources / "brave-browser-release.list").exists())
             self.assertFalse((sources / "brave-browser-release.sources").exists())
             self.assertTrue((keys / "hluk-copyq.gpg").exists())
+            output = run("warp-terminal")
+            self.assertIn("Download the repository signing key", output)
+            self.assertEqual((keys / "warpdotdev.asc").read_bytes(), key.read_bytes())
+            self.assertTrue((sources / "warpdotdev.sources").exists())
+            self.assertFalse((sources / "warpdotdev.list").exists())
             before = (keys / "docker.asc").read_bytes()
             (sources / "docker.list").write_text("legacy docker\n")
             key.write_text("not a key\n")
@@ -159,12 +174,18 @@ class RepositoryMigrationTest(unittest.TestCase):
             self.assertTrue((sources / "docker.list").exists())
             # No unrelated feature is enabled for these tag-routing checks.
             play[0]["vars"]["common_enable_brave"] = False
+            key.write_bytes(key_bytes)
             playbook.write_text(yaml.safe_dump(play))
             for tag in ("vscode", "edge", "brave", "docker", "dev-tools", "nodejs", "warp-terminal", "git", "repos", "packages", "system"):
                 with self.subTest(tag=tag):
                     output = run(tag)
                     self.assertIn("MOCK_GNUPG_INSTALL", output)
                     self.assertIn("MOCK_APT_CACHE_REFRESH", output)
+                    if tag == "warp-terminal":
+                        self.assertIn("Download the repository signing key", output)
+                        self.assertEqual((keys / "warpdotdev.asc").read_bytes(), key_bytes)
+                        self.assertTrue((sources / "warpdotdev.sources").exists())
+                        self.assertFalse((sources / "warpdotdev.list").exists())
 
 
 class SigningKeyTest(unittest.TestCase):
@@ -194,6 +215,15 @@ class SigningKeyTest(unittest.TestCase):
             expired = base / "expired.asc"
             expired.write_bytes(subprocess.run(["gpg", "--homedir", str(home), "--batch", "--armor", "--export"], check=True, capture_output=True).stdout)
             self.assertNotEqual(check(expired, "key.asc").returncode, 0)
+
+
+class WarpUpgradeTest(unittest.TestCase):
+    def test_warp_package_tracks_latest_apt_version(self):
+        tasks = yaml.safe_load((ROOT / "ansible/roles/desktop_apps/tasks/main.yml").read_text())
+        warp_task = next(task for task in tasks if task.get("name") == "Install Warp Terminal from its official repository")
+        self.assertEqual(warp_task["ansible.builtin.apt"]["name"], "warp-terminal")
+        self.assertEqual(warp_task["ansible.builtin.apt"]["state"], "latest")
+
 
 class UpgradeBackupTest(unittest.TestCase):
     def test_backup_with_and_without_legacy_sources_list(self):
